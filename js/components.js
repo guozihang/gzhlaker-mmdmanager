@@ -39,7 +39,7 @@ function getDefaultConfig() {
                 buttonMode: 'hover', pageSize: 20,
                 thumbnailWidth: 48, thumbnailHeight: 48,
                 gridThumbWidth: 128, gridThumbHeight: 128,
-                viewMode: 'table', coexistCategories: [], defaultModelMode: 'custom'
+                viewMode: 'table', coexistEnabled: false, coexistCategories: [], defaultModelMode: 'custom'
             },
             render: {
                 ambientColor: '#666666', directionalColor: '#887766',
@@ -69,6 +69,8 @@ function migrateConfig(raw) {
     delete s.dualModel; // Replaced by coexistCategories
     // Ensure new fields exist
     if (!s.preview) s.preview = {};
+    if (s.preview.coexistEnabled === undefined) s.preview.coexistEnabled = false;
+    if (!s.preview.coexistCategories) s.preview.coexistCategories = [];
     if (!s.render) s.render = {};
     var defPrev = getDefaultConfig().settings.preview;
     var defRender = getDefaultConfig().settings.render;
@@ -823,77 +825,46 @@ var componentIndex = {
         },
         updateModel: function (path) {
             var self = this;
-            // Determine model's category
-            var modelCat = self._getItemCategory(path);
-            if (!modelCat) modelCat = self._deriveCategoryFromStore(path);
-            var coexist = self.settings.preview && self.settings.preview.coexistCategories || [];
-            // Check if new model's category can coexist with existing
-            var newCanCoexist = coexist.indexOf(modelCat) >= 0;
-            var existingCanCoexist = false;
-            if (window.model) {
-                var ec = self._getItemCategory(window.model.userData.modelPath);
-                if (!ec) ec = self._deriveCategoryFromStore(window.model.userData.modelPath);
-                existingCanCoexist = coexist.indexOf(ec) >= 0;
-            }
-            if (window.sceneModel) {
-                var ec2 = self._getItemCategory(window.sceneModel.userData.modelPath);
-                if (!ec2) ec2 = self._deriveCategoryFromStore(window.sceneModel.userData.modelPath);
-                existingCanCoexist = existingCanCoexist || (coexist.indexOf(ec2) >= 0);
-            }
-
             if (this.showPath != path) {
-                // Remove models that can't coexist with the new one
+                // Check coexistence settings
+                var coexistOn = self.settings.preview && self.settings.preview.coexistEnabled;
+                var coexistCats = self.settings.preview && self.settings.preview.coexistCategories || [];
+                var newCat = self._getItemCategory(path) || self._deriveCategoryFromStore(path);
+                var newCanCoexist = coexistOn && (coexistCats.indexOf(newCat) >= 0);
+
                 if (newCanCoexist) {
                     // Only remove same-category models
-                    if (window.model && self._getItemCategory(window.model.userData.modelPath) === modelCat) {
-                        window.scene.remove(window.model);
-                        clearCache(window.model);
+                    if (window.model && (self._getItemCategory(window.model.userData.modelPath) || self._deriveCategoryFromStore(window.model.userData.modelPath)) === newCat) {
+                        window.scene.remove(window.model); clearCache(window.model); window.model = null;
                     }
-                    if (window.sceneModel && self._getItemCategory(window.sceneModel.userData.modelPath) === modelCat) {
-                        window.scene.remove(window.sceneModel);
-                        clearCache(window.sceneModel);
+                    if (window.sceneModel && (self._getItemCategory(window.sceneModel.userData.modelPath) || self._deriveCategoryFromStore(window.sceneModel.userData.modelPath)) === newCat) {
+                        window.scene.remove(window.sceneModel); clearCache(window.sceneModel); window.sceneModel = null;
                     }
                 } else {
-                    // Remove non-coexisting models
-                    if (window.model && !(coexist.indexOf(self._getItemCategory(window.model.userData.modelPath) || self._deriveCategoryFromStore(window.model.userData.modelPath)) >= 0)) {
-                        window.scene.remove(window.model);
-                        clearCache(window.model);
-                    }
-                    if (window.sceneModel && !(coexist.indexOf(self._getItemCategory(window.sceneModel.userData.modelPath) || self._deriveCategoryFromStore(window.sceneModel.userData.modelPath)) >= 0)) {
-                        window.scene.remove(window.sceneModel);
-                        clearCache(window.sceneModel);
-                    }
+                    // Not coexisting: clear all models
+                    if (window.model) { window.scene.remove(window.model); clearCache(window.model); window.model = null; }
+                    if (window.sceneModel) { window.scene.remove(window.sceneModel); clearCache(window.sceneModel); window.sceneModel = null; }
                 }
 
                 var ext = window.path.extname(path).toLowerCase();
                 if (ext == ".pmx" || ext == ".pmd") {
-                    window.loader.MMDLoader.loadModel(
-                        path,
-                        function (mmd) {
-                            window.model = mmd;
-                            mmd.userData.modelPath = path;
-                            window.scene.add(window.model);
-                            setupModel(mmd, false);
-                            resetCamera();
-                            self._capturePreviewAfterLoad(path);
-                        },
-                        window.onProgress,
-                        null
-                    );
+                    window.loader.MMDLoader.loadModel(path, function (mmd) {
+                        window.model = mmd;
+                        mmd.userData.modelPath = path;
+                        window.scene.add(window.model);
+                        setupModel(mmd, false);
+                        resetCamera();
+                        self._capturePreviewAfterLoad(path);
+                    }, window.onProgress, null);
                 } else if (ext == ".x") {
-                    window.loader.XLoader.load(
-                        path,
-                        function (x) {
-                            window.model = x;
-                            x.userData.modelPath = path;
-                            window.scene.add(window.model);
-                            setupModel(x, false);
-                            resetCamera();
-                            self._capturePreviewAfterLoad(path);
-                        },
-                        window.onProgress,
-                        null
-                    );
+                    window.loader.XLoader.load(path, function (x) {
+                        window.model = x;
+                        x.userData.modelPath = path;
+                        window.scene.add(window.model);
+                        setupModel(x, false);
+                        resetCamera();
+                        self._capturePreviewAfterLoad(path);
+                    }, window.onProgress, null);
                 }
                 this.showPath = path;
             } else {
@@ -1233,7 +1204,6 @@ var componentIndex = {
                     autoRotate: false,
                     cameraFov: 45,
                     cameraDistance: 30,
-                    coexistCategories: [],
                     defaultModelMode: 'custom',
                     showSkybox: true,
                     skyboxMode: 'color',
