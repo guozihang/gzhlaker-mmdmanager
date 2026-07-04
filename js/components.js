@@ -1879,7 +1879,7 @@ window.captureSinglePreview = function(modelPath) {
                     clearCache(mmd);
                     window.model = null;
                     resolve();
-                }, 2000);
+                }, 3000);
             },
             window.onProgress,
             function() { resolve(); }
@@ -1943,7 +1943,7 @@ window.autoPreviewImport = function(folderPath, onProgress) {
                             clearCache(mmd);
                             window.model = null;
                             processNext();
-                        }, 2000);
+                        }, 3000);
                     },
                     window.onProgress,
                     function() { onProgress(modelName, '失败', curIdx, total); processNext(); }

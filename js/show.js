@@ -218,6 +218,8 @@ function capturePreview() {
     var prevAutoRotate = controls ? controls.autoRotate : false;
     if (controls) controls.autoRotate = false;
     controls && controls.update();
+    // Force at least one animation frame to ensure textures are bound
+    renderer.render(scene, camera);
     effect.render(scene, camera);
     var dataUrl = renderer.domElement.toDataURL('image/png');
     if (controls) controls.autoRotate = prevAutoRotate;
