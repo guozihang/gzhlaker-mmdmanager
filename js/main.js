@@ -127,7 +127,7 @@ function collectDropFiles(srcPath) {
         var ext = window.path.extname(srcPath).toLowerCase();
         var stats = window.fs.statSync(srcPath);
         if (!stats.isDirectory) {
-            var allowed = getMonitoredExtensions();
+            var allowed = getAllCategoryExtensions();
             if (allowed[ext]) {
                 // Single file: wrap in its parent folder
                 var parentName = window.path.basename(window.path.dirname(srcPath));
@@ -138,21 +138,17 @@ function collectDropFiles(srcPath) {
                 });
             }
         } else {
-            // Dragged folder: preserve the folder name as relDir root
+            // Dragged folder: use union of all category extensions for scanning
             var folderName = window.path.basename(srcPath);
-            scanDropDir(srcPath + window.path.sep, files, srcPath, folderName);
+            var allExts = getAllCategoryExtensions();
+            scanDropDir(srcPath + window.path.sep, files, srcPath, folderName, allExts);
         }
     } catch(e) {}
     return files;
 }
 
-function getMonitoredExtensions() {
-    var cats = (window.app && window.app.settings && window.app.settings.categories) || [
-        { name: '人物模型', extensions: '.pmx,.pmd' },
-        { name: '场景模型', extensions: '.pmx,.x' },
-        { name: '动作文件', extensions: '.vmd' },
-        { name: 'MME特效', extensions: '.fx,.x' }
-    ];
+function getAllCategoryExtensions() {
+    var cats = (window.store && window.store.state && window.store.state.settings && window.store.state.settings.categories) || [];
     var map = {};
     cats.forEach(function(c) {
         (c.extensions || '').split(',').forEach(function(e) {
@@ -160,21 +156,39 @@ function getMonitoredExtensions() {
             if (e) map[e] = true;
         });
     });
+    if (Object.keys(map).length === 0) {
+        map['.pmx'] = true; map['.pmd'] = true;
+    }
     return map;
 }
 
-function scanDropDir(dir, files, rootPath, wrapFolder) {
+function getCategoryExtensions(catName) {
+    var cats = (window.store && window.store.state && window.store.state.settings && window.store.state.settings.categories) || [];
+    for (var i = 0; i < cats.length; i++) {
+        if (cats[i].name === catName) {
+            var map = {};
+            (cats[i].extensions || '').split(',').forEach(function(e) {
+                e = e.trim().toLowerCase();
+                if (e) map[e] = true;
+            });
+            if (Object.keys(map).length > 0) return map;
+        }
+    }
+    return getAllCategoryExtensions();
+}
+
+function scanDropDir(dir, files, rootPath, wrapFolder, allowed) {
+    if (!allowed) allowed = getAllCategoryExtensions();
     if (!rootPath) rootPath = dir;
     dir = dir.replace(/[/\\]+$/, '') + window.path.sep;
     var rp = rootPath.replace(/[/\\]+$/, '');
     var list;
     try { list = window.fs.readdirSync(dir); } catch(e) { return; }
-    var allowed = getMonitoredExtensions();
     for (var i = 0; i < list.length; i++) {
         var full = dir + list[i];
         var st;
         try { st = window.fs.statSync(full); } catch(e) { continue; }
-        if (st.isDirectory) { scanDropDir(full, files, rootPath); }
+        if (st.isDirectory) { scanDropDir(full, files, rootPath, null, allowed); }
         else {
             var ext = window.path.extname(list[i]).toLowerCase();
             if (allowed[ext]) {
@@ -218,6 +232,10 @@ var cats = settingsRef.categories || [];
         selectedPaths[fd.name] = dataPaths[0].path;
         choices[fd.name] = dataPaths[0].category || '人物模型';
         tagChoices[fd.name] = (dataPaths[0].tags || []).slice();
+        var catExts = getCategoryExtensions(choices[fd.name]);
+        fd._filteredModels = fd.models.filter(function(m) {
+            return catExts[window.path.extname(m.src).toLowerCase()];
+        });
     });
 
     var vm = new Vue({
@@ -233,6 +251,11 @@ var cats = settingsRef.categories || [];
                 if (!dpEntry) return;
                 this.choices[fd.name] = dpEntry.category || '人物模型';
                 this.tagChoices[fd.name] = (dpEntry.tags || []).slice();
+                // Filter models to only those matching path's category extensions
+                var catExts = getCategoryExtensions(this.choices[fd.name]);
+                fd._filteredModels = fd.models.filter(function(m) {
+                    return catExts[window.path.extname(m.src).toLowerCase()];
+                });
             },
             preview: function(path) { if (window._previewModel) window._previewModel(path); },
             toggleTag: function(key, tag) {
@@ -263,7 +286,7 @@ var cats = settingsRef.categories || [];
                     window.copyFolder(copySrc, destPath).then(function(res) {
                         var finalDest = res.success ? (res.dest || destPath) : destPath;
                         if (res.success) {
-                            fd.models.forEach(function(m) {
+                            (fd._filteredModels || fd.models).forEach(function(m) {
                                 var modelDest = finalDest.replace(/[/\\]+$/, '') + window.path.sep + window.path.basename(m.src);
                                 window._addItemToDataJson({
                                     path: modelDest, category: self.choices[fd.name] || '人物模型',
@@ -293,7 +316,7 @@ var cats = settingsRef.categories || [];
             '        </el-select>' +
             '      </div>' +
             '      <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">' +
-            '        <el-button v-for="m in fd.models" :key="m.src" size="mini" circle @click="preview(m.src)">模</el-button>' +
+            '        <el-button v-for="m in fd._filteredModels" :key="m.src" size="mini" circle @click="preview(m.src)">模</el-button>' +
             '        <div v-if="tags.length" style="display:flex;gap:2px;flex-wrap:wrap">' +
             '          <span v-for="t in tags" :key="t" style="font-size:9px;border-radius:2px;padding:1px 4px;cursor:pointer" :style="tagChoices[fd.name]&&tagChoices[fd.name].indexOf(t)>=0?\'background:#67c23a;color:#fff\':\'background:#eee;color:#999\'" @click="toggleTag(fd.name, t)">{{t}}</span>' +
             '        </div>' +
@@ -334,6 +357,7 @@ var cats = settingsRef.categories || [];
         var first = fd.models[0];
         choices[fd.name] = first.defaultCategory || cats[0].name;
         tagChoices[fd.name] = (first.defaultTags || []).slice();
+        fd._filteredModels = fd.models.slice();
     });
     var vm = new Vue({
         el: el,
@@ -390,7 +414,7 @@ var cats = settingsRef.categories || [];
             '        </el-select>' +
             '      </div>' +
             '      <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">' +
-            '        <el-button v-for="m in fd.models" :key="m.src" size="mini" circle @click="preview(m.src)">模</el-button>' +
+            '        <el-button v-for="m in fd._filteredModels" :key="m.src" size="mini" circle @click="preview(m.src)">模</el-button>' +
             '        <div v-if="tags.length" style="display:flex;gap:2px;flex-wrap:wrap">' +
             '          <span v-for="t in tags" :key="t" style="font-size:9px;border-radius:2px;padding:1px 4px;cursor:pointer" :style="tagChoices[fd.name]&&tagChoices[fd.name].indexOf(t)>=0?\'background:#67c23a;color:#fff\':\'background:#eee;color:#999\'" @click="toggleTag(fd.name, t)">{{t}}</span>' +
             '        </div>' +
