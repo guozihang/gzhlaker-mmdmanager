@@ -104,7 +104,7 @@ function collectAndProcess(paths, callback) {
                 try {
                     var tc = window.fs.readdirSync(tmpDir);
                     tc.forEach(function(c) {
-                        try { var cs = window.fs.statSync(tmpDir + window.path.sep + c); if (cs && cs.isDirectory()) hasDirs = true; } catch(e) {}
+                        try { var cs = window.fs.statSync(tmpDir + '/' +c); if (cs && cs.isDirectory()) hasDirs = true; } catch(e) {}
                     });
                 } catch(e) {}
                 if (!hasDirs && zfiles.length > 0) {
@@ -120,8 +120,7 @@ function collectAndProcess(paths, callback) {
 }
 
 function collectDropFiles(srcPath) {
-    // Normalize path: strip trailing separators, replace double backslashes
-    srcPath = srcPath.replace(/[\\/]+$/, '');
+        srcPath = srcPath.replace(/\\/g, '/');
     var files = [];
     try {
         var ext = window.path.extname(srcPath).toLowerCase();
@@ -207,6 +206,8 @@ function scanDropDir(dir, files, rootPath, wrapFolder, allowed) {
 function showDropImportDialog(files) {
     var settings = (window.store && window.store.state && window.store.state.settings) || {};
     var dataPaths = (settings.dataPaths || []).filter(function(p) { return p.path && p.path.length > 0; });
+    // Normalize all paths to use forward slashes
+    dataPaths.forEach(function(dp) { dp.path = dp.path.replace(/\\/g, '/'); });
     if (dataPaths.length === 0) {
         window.showNotify('请先在设置中添加数据存储路径', 'warning');
         return;
@@ -280,14 +281,14 @@ var cats = settingsRef.categories || [];
                     var fd = self.folders[done];
                     window.updateImportProgress({ text: '导入: ' + fd.name, detail: '(' + (done + 1) + '/' + total + ')', done: done });
                     var basePath = self.selectedPaths[fd.name].replace(/[/\\]+$/, '');
-                    var destPath = basePath + window.path.sep + fd.name;
+                    var destPath = basePath + '/' +fd.name;
                     // Copy first model's source directory (the whole folder)
                     var copySrc = window.path.dirname(fd.models[0].src);
                     window.copyFolder(copySrc, destPath).then(function(res) {
                         var finalDest = res.success ? (res.dest || destPath) : destPath;
                         if (res.success) {
                             (fd._filteredModels || fd.models).forEach(function(m) {
-                                var modelDest = finalDest.replace(/[/\\]+$/, '') + window.path.sep + window.path.basename(m.src);
+                                var modelDest = finalDest.replace(/[/\\]+$/, '') + '/' +window.path.basename(m.src);
                                 window._addItemToDataJson({
                                     path: modelDest, category: self.choices[fd.name] || '人物模型',
                                     group: fd.name, tags: self.tagChoices[fd.name] || []

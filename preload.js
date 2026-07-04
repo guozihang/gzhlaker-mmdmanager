@@ -107,9 +107,9 @@ contextBridge.exposeInMainWorld('fs', {
 contextBridge.exposeInMainWorld('path', {
     extname: (p) => pathMod.extname(p),
     basename: (p) => pathMod.basename(p),
-    dirname: (p) => pathMod.dirname(p),
-    join: (...args) => pathMod.join(...args),
-    sep: pathMod.sep
+    dirname: (p) => pathMod.dirname(p).replace(/\\/g, '/'),
+    join: (...args) => pathMod.join(...args).replace(/\\/g, '/'),
+    sep: '/'
 });
 
 contextBridge.exposeInMainWorld('process', {
