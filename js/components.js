@@ -29,7 +29,7 @@ function getDefaultConfig() {
                 { name: '动作文件', extensions: '.vmd', parent: '', type: 'motion' }
             ],
             tags: [],
-            scanExtensions: '',
+            availableExtensions: '.pmx,.pmd,.x,.vmd,.fx',
             preview: {
                 ambientColor: '#666666', directionalColor: '#887766',
                 showAxis: true, autoRotate: true, cameraFov: 45, cameraDistance: 30,
@@ -76,7 +76,7 @@ function migrateConfig(raw) {
     for (var k2 in defRender) { if (s.render[k2] === undefined) s.render[k2] = defRender[k2]; }
     if (!s.categories) s.categories = getDefaultConfig().settings.categories;
     if (!s.tags) s.tags = [];
-    if (!s.scanExtensions) s.scanExtensions = '';
+    if (!s.availableExtensions) s.availableExtensions = '.pmx,.pmd,.x,.vmd,.fx';
     if (s.render && s.render.skyColorTop === undefined) {
         s.render.skyColorTop = '#FFFFFF';
         s.render.skyColorBottom = '#F0F0F0';
@@ -248,7 +248,7 @@ var componentIndex = {
             currentCategory: '',
             categoryDialogVisible: false,
             categoryDialogTitle: '',
-            categoryForm: { name: '', extensions: '', parent: '' },
+            categoryForm: { name: '', extensions: [], parent: '' },
             categoryEditIndex: -1,
             newTagInput: '',
             tagEditDialogVisible: false,
@@ -399,6 +399,12 @@ var componentIndex = {
         },
         pagedVmds: {
             get() { return this.paginate(this.vmds, this.currentPageVmds); },
+        },
+        availableExtList: {
+            get() {
+                var src = this.settings.availableExtensions || '.pmx,.pmd,.x,.vmd,.fx';
+                return src.split(',').map(function(e) { return e.trim(); }).filter(function(e) { return e; });
+            },
         },
         monitoredExtensions: {
             get() {
@@ -1199,6 +1205,7 @@ var componentIndex = {
             var defaults = {
                 dataPath: '',
                 dataPaths: [{ path: '', category: '人物模型', tags: [] }],
+                availableExtensions: '.pmx,.pmd,.x,.vmd,.fx',
                 defaultModelPath: '',
                 mmdPath: '',
                 preview: {
@@ -1349,13 +1356,17 @@ var componentIndex = {
         // Category management
         addCategory: function() {
             this.categoryDialogTitle = '添加种类';
-            this.categoryForm = { name: '', extensions: '', parent: '' };
+            this.categoryForm = { name: '', extensions: [], parent: '' };
             this.categoryEditIndex = -1;
             this.categoryDialogVisible = true;
         },
         editCategoryNode: function(data) {
             this.categoryDialogTitle = '编辑种类';
-            this.categoryForm = { name: data.name, extensions: data.extensions, parent: data.parent || '' };
+            this.categoryForm = {
+                name: data.name,
+                extensions: (data.extensions || '').split(',').map(function(e) { return e.trim(); }).filter(function(e) { return e; }),
+                parent: data.parent || ''
+            };
             this.categoryEditIndex = this.categories.findIndex(function(c) { return c.name === data.name; });
             this.categoryDialogVisible = true;
         },
@@ -1371,8 +1382,9 @@ var componentIndex = {
         saveCategory: function() {
             var cats = this.settings.categories.slice();
             var f = this.categoryForm;
-            if (!f.name || !f.extensions) { this.message('名称和后缀不能为空', 'warning'); return; }
-            var entry = { name: f.name, extensions: f.extensions, parent: f.parent || '' };
+            var exts = Array.isArray(f.extensions) ? f.extensions.join(',') : f.extensions;
+            if (!f.name || !exts) { this.message('名称和后缀不能为空', 'warning'); return; }
+            var entry = { name: f.name, extensions: exts, parent: f.parent || '' };
             if (this.categoryEditIndex >= 0) {
                 cats.splice(this.categoryEditIndex, 1, entry);
             } else {
@@ -1724,7 +1736,7 @@ var componentIndex = {
         },
         _cleanUnmonitoredItems: function() {
             var allowed = {};
-            var scanExts = (this.monitoredExtensions || '.pmx,.pmd').split(',');
+            var scanExts = (this.monitoredExtensions || '.pmx,.pmd').split(',').filter(function(e) { return e; });
             scanExts.forEach(function(e) { e = e.trim().toLowerCase(); if (e) allowed[e] = true; });
             var dp = PathManager.getDataFullPath();
             try {
