@@ -122,6 +122,20 @@ ipcMain.on('drag:start', (event, filePath) => {
     });
 });
 
+ipcMain.handle('fs:extractZip', async (event, { zipPath, destDir }) => {
+    const { execSync } = require('child_process');
+    try {
+        if (process.platform === 'win32') {
+            execSync('powershell -Command "Expand-Archive -Path \\"' + zipPath + '\\" -DestinationPath \\"' + destDir + '\\" -Force"');
+        } else {
+            execSync('unzip -o "' + zipPath + '" -d "' + destDir + '"');
+        }
+        return { success: true, destDir };
+    } catch(e) {
+        return { success: false, error: e.message };
+    }
+});
+
 ipcMain.handle('clipboard:write', (event, text) => {
     clipboard.writeText(text);
 });

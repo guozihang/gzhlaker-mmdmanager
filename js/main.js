@@ -60,32 +60,85 @@ hulla = new hullabaloo();
 
 
 function handleDrop(droppedPath) {
-    var files = collectDropFiles(droppedPath);
-    if (files.length === 0) return;
-    showDropImportDialog(files);
+    collectAndProcess([droppedPath], function(files) {
+        if (files.length > 0) showDropImportDialog(files);
+    });
 }
 
 window.handleBatchDrop = function(paths, total) {
-    var allFiles = [];
-    paths.forEach(function(p) {
-        allFiles = allFiles.concat(collectDropFiles(p));
+    collectAndProcess(paths, function(files) {
+        if (files.length > 0) showDropImportDialog(files);
     });
-    if (allFiles.length === 0) return;
-    showDropImportDialog(allFiles);
 };
+
+function collectAndProcess(paths, callback) {
+    // First pass: separate zips from regular files
+    var zipFiles = [];
+    var regularFiles = [];
+    paths.forEach(function(p) {
+        var ext = window.path.extname(p).toLowerCase();
+        if (ext === '.zip') {
+            zipFiles.push(p);
+        } else {
+            regularFiles = regularFiles.concat(collectDropFiles(p));
+        }
+    });
+    if (zipFiles.length === 0) { callback(regularFiles); return; }
+    // Extract zips async
+    var extracted = [];
+    var idx = 0;
+    function nextZip() {
+        if (idx >= zipFiles.length) {
+            callback(regularFiles.concat(extracted));
+            return;
+        }
+        var zp = zipFiles[idx];
+        idx++;
+        var tmpDir = zp.replace(/\.zip$/i, '') + '_extracted_' + Date.now();
+        window.fs.mkdirSync(tmpDir, { recursive: true });
+        window.extractZip(zp, tmpDir).then(function(res) {
+            if (res && res.success) {
+                var zfiles = collectDropFiles(tmpDir);
+                // If extracted files are all at root (no subdirs), wrap in folder named after ZIP
+                var hasDirs = false;
+                try {
+                    var tc = window.fs.readdirSync(tmpDir);
+                    tc.forEach(function(c) {
+                        try { var cs = window.fs.statSync(tmpDir + window.path.sep + c); if (cs && cs.isDirectory()) hasDirs = true; } catch(e) {}
+                    });
+                } catch(e) {}
+                if (!hasDirs && zfiles.length > 0) {
+                    var zipName = window.path.basename(zp).replace(/\.zip$/i, '');
+                    zfiles.forEach(function(zf) { zf.relDir = zipName + (zf.relDir ? (window.path.sep + zf.relDir) : ''); });
+                }
+                extracted = extracted.concat(zfiles);
+            }
+            nextZip();
+        }).catch(function() { nextZip(); });
+    }
+    nextZip();
+}
 
 function collectDropFiles(srcPath) {
     var files = [];
     try {
+        var ext = window.path.extname(srcPath).toLowerCase();
         var stats = window.fs.statSync(srcPath);
         if (!stats.isDirectory) {
-            var ext = window.path.extname(srcPath).toLowerCase();
             var allowed = getMonitoredExtensions();
             if (allowed[ext]) {
-                files.push({ src: srcPath, name: window.path.basename(srcPath) });
+                // Single file: wrap in its parent folder
+                var parentName = window.path.basename(window.path.dirname(srcPath));
+                files.push({
+                    src: srcPath,
+                    name: window.path.basename(srcPath),
+                    relDir: parentName
+                });
             }
         } else {
-            scanDropDir(srcPath + '/', files);
+            // Dragged folder: preserve the folder name as relDir root
+            var folderName = window.path.basename(srcPath);
+            scanDropDir(srcPath + window.path.sep, files, srcPath, folderName);
         }
     } catch(e) {}
     return files;
@@ -108,7 +161,9 @@ function getMonitoredExtensions() {
     return map;
 }
 
-function scanDropDir(dir, files) {
+function scanDropDir(dir, files, rootPath, wrapFolder) {
+    if (!rootPath) rootPath = dir;
+    var rp = rootPath.replace(/[/\\]+$/, '');
     var list;
     try { list = window.fs.readdirSync(dir); } catch(e) { return; }
     var allowed = getMonitoredExtensions();
@@ -116,11 +171,17 @@ function scanDropDir(dir, files) {
         var full = dir + list[i];
         var st;
         try { st = window.fs.statSync(full); } catch(e) { continue; }
-        if (st.isDirectory) { scanDropDir(full + '/', files); }
+        if (st.isDirectory) { scanDropDir(full + window.path.sep, files, rootPath); }
         else {
             var ext = window.path.extname(list[i]).toLowerCase();
             if (allowed[ext]) {
-                files.push({ src: full, name: list[i] });
+                var parentNorm = window.path.dirname(full).replace(/[/\\]+$/, '');
+                var relDir = '';
+                if (parentNorm !== rp && parentNorm.length > rp.length) {
+                    relDir = parentNorm.slice(rp.length + 1);
+                }
+                if (!relDir && wrapFolder) relDir = wrapFolder;
+                files.push({ src: full, name: list[i], relDir: relDir });
             }
         }
     }
@@ -187,6 +248,7 @@ var cats = settingsRef.categories || [];
                 this.visible = false;
                 var self = this;
                 var total = this.files.length;
+                if (total === 0) { window.showNotify('没有可导入的文件', 'warning'); return; }
                 window.updateImportProgress({ visible: true, total: total, done: 0, text: '正在导入...' });
                 var done = 0;
                 function next() {
@@ -200,7 +262,8 @@ var cats = settingsRef.categories || [];
                     }
                     var f = self.files[done];
                     window.updateImportProgress({ text: '导入: ' + f.name, detail: '(' + (done + 1) + '/' + total + ')', done: done });
-                    var destPath = self.selectedPaths[f.src] + window.path.sep + window.path.basename(f.src);
+                    var baseName = f.relDir ? (f.relDir + window.path.sep + window.path.basename(f.src)) : window.path.basename(f.src);
+                    var destPath = self.selectedPaths[f.src] + window.path.sep + baseName;
                     window.copyFolder(f.src, destPath).then(function(res) {
                         var finalDest = res.success ? (res.dest || destPath) : destPath;
                         if (res.success) {

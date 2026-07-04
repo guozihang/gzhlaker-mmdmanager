@@ -147,6 +147,9 @@ contextBridge.exposeInMainWorld('exportToMmd', (opts) => {
 contextBridge.exposeInMainWorld('copyFolder', (src, dest) => {
     return ipcRenderer.invoke('fs:copyFolder', { src, dest });
 });
+contextBridge.exposeInMainWorld('extractZip', (zipPath, destDir) => {
+    return ipcRenderer.invoke('fs:extractZip', { zipPath, destDir });
+});
 
 
 contextBridge.exposeInMainWorld('savePreviewImage', (filePath, base64Data) => {
