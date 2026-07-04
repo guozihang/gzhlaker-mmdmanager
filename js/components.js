@@ -1068,6 +1068,7 @@ var componentIndex = {
                 self._reloadDataJson();
                 self.$forceUpdate();
                 self.message("配置已保存");
+                setTimeout(function () { router.replace('/'); }, 500);
             } catch(e) {
                 self.message("保存失败: " + e.message);
             }
