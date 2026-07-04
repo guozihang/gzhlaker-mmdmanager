@@ -14,6 +14,81 @@ function longestCommonSubstring(a, b) {
 /*----------------------------------------------------
 # ● Init主界面的组件
 ----------------------------------------------------*/
+function getDefaultConfig() {
+    return {
+        version: '1.0',
+        items: [],
+        important: [],
+        settings: {
+            dataPath: '',
+            dataPaths: [],
+            defaultModelPath: '',
+            categories: [
+                { name: '人物模型', extensions: '.pmx,.pmd', parent: '', type: 'model' },
+                { name: '场景模型', extensions: '.pmx,.x', parent: '', type: 'model' },
+                { name: '动作文件', extensions: '.vmd', parent: '', type: 'motion' },
+                { name: 'MME特效', extensions: '.fx,.x', parent: '', type: 'effect' }
+            ],
+            tags: [],
+            scanExtensions: '',
+            preview: {
+                ambientColor: '#666666', directionalColor: '#887766',
+                showAxis: true, autoRotate: true, cameraFov: 45, cameraDistance: 30,
+                dualModel: false, showSkybox: true,
+                skyboxMode: 'color', skyboxImagePath: '',
+                skyColorTop: '#FFFFFF', skyColorBottom: '#F0F0F0', skyColorSide: '#FFFFFF',
+                buttonMode: 'hover', pageSize: 20,
+                thumbnailWidth: 48, thumbnailHeight: 48,
+                gridThumbWidth: 128, gridThumbHeight: 128,
+                viewMode: 'table', coexistCategories: [], defaultModelMode: 'custom'
+            },
+            render: {
+                ambientColor: '#666666', directionalColor: '#887766',
+                showAxis: false, autoRotate: false, cameraFov: 45, cameraDistance: 30,
+                showSkybox: true, skyboxMode: 'color', skyboxImagePath: '',
+                skyColorTop: '#FFFFFF', skyColorBottom: '#F0F0F0', skyColorSide: '#FFFFFF'
+            }
+        }
+    };
+}
+
+function migrateConfig(raw) {
+    // Migrate old config format to v1.0
+    var s = raw.settings || {};
+    // Ensure dataPaths exists
+    if (!s.dataPaths) {
+        s.dataPaths = s.dataPath ? [{ path: s.dataPath, category: '人物模型', tags: [] }] : [];
+    } else {
+        s.dataPaths.forEach(function(p) {
+            if (!p.category) p.category = '人物模型';
+            if (!p.tags) p.tags = [];
+            delete p.mode; // Remove old mode field
+        });
+    }
+    // Clean up old fields
+    delete s.dataPathMode;
+    delete s.dualModel; // Replaced by coexistCategories
+    // Ensure new fields exist
+    if (!s.preview) s.preview = {};
+    if (!s.render) s.render = {};
+    var defPrev = getDefaultConfig().settings.preview;
+    var defRender = getDefaultConfig().settings.render;
+    for (var k in defPrev) { if (s.preview[k] === undefined) s.preview[k] = defPrev[k]; }
+    for (var k2 in defRender) { if (s.render[k2] === undefined) s.render[k2] = defRender[k2]; }
+    if (!s.categories) s.categories = getDefaultConfig().settings.categories;
+    if (!s.tags) s.tags = [];
+    if (!s.scanExtensions) s.scanExtensions = '';
+    if (s.render && s.render.skyColorTop === undefined) {
+        s.render.skyColorTop = '#FFFFFF';
+        s.render.skyColorBottom = '#F0F0F0';
+        s.render.skyColorSide = '#FFFFFF';
+    }
+    raw.settings = s;
+    raw.version = '1.0';
+    raw._migrated = true;
+    return raw;
+}
+
 var componentInit = {
     template: `#tInit`,
     methods: {
@@ -21,17 +96,20 @@ var componentInit = {
             /*----------------------
             # ● 读取配置文件（优先，影响后续路径）
             ----------------------*/
+            var applyDataPath = function(dp) {
+                // PathManager no longer needs these; all paths are user-configured
+            };
+
             var applySettings = function(cfg) {
-                if (cfg && cfg.dataPath && cfg.dataPath !== PathManager.PROGRAMPATH) {
-                    PathManager.PROGRAMPATH = cfg.dataPath;
-                    PathManager.DATAPATH = path.join(cfg.dataPath, 'data') + path.sep;
-                    PathManager.SOFTPATH = path.join(cfg.dataPath, 'software') + path.sep;
-                    PathManager.PROJECTPATH = path.join(cfg.dataPath, 'project') + path.sep;
-                    PathManager.MODELPATH = path.join(PathManager.DATAPATH, 'Model') + path.sep;
-                    PathManager.MMEPATH = path.join(PathManager.DATAPATH, 'MME') + path.sep;
-                    PathManager.SCENEPATH = path.join(PathManager.DATAPATH, 'Scene') + path.sep;
-                    PathManager.VMDPATH = path.join(PathManager.DATAPATH, 'Vmd') + path.sep;
-                    PathManager.GAMEPATH = path.join(PathManager.DATAPATH, 'Game') + path.sep;
+                // Upgrade old format
+                if (cfg && cfg.dataPath && !cfg.dataPaths) {
+                    cfg.dataPaths = [{ path: cfg.dataPath, category: '人物模型', tags: [] }];
+                }
+                if (cfg && cfg.dataPaths && cfg.dataPaths.length > 0) {
+                    cfg.dataPaths.forEach(function(p) {
+                        if (!p.category) p.category = '人物模型';
+                        if (!p.tags) p.tags = [];
+                    });
                 }
                 if (cfg && cfg.defaultModelPath !== undefined) {
                     this.$store.state.settings.defaultModelPath = cfg.defaultModelPath;
@@ -47,222 +125,81 @@ var componentInit = {
                 try { fs.mkdirSync(configDir, { recursive: true }); } catch(e) { console.log("mkdir failed:", e); }
             }
             var dataJsonPath = PathManager.getDataFullPath();
-            console.log("data.json path:", dataJsonPath, "exists:", fs.existsSync(dataJsonPath));
+            var raw = null;
             if (fs.existsSync(dataJsonPath)) {
                 try {
+                    raw = JSON.parse(fs.readFileSync(dataJsonPath).toString('utf8'));
+                } catch(e) { raw = null; }
+            }
+            // Migrate old config or create default
+            if (!raw) {
+                raw = getDefaultConfig();
+            } else {
+                // All configs go through migration to fill in any missing fields
+                raw = migrateConfig(raw);
+            }
+            if (raw.settings) {
+                applySettings(raw.settings);
+                this.$store.state.settings = raw.settings;
+            }
+            // Ensure version is set
+            raw.version = '1.0';
+            // Save migrated/default config
+            if (!fs.existsSync(dataJsonPath) || (raw.settings && !raw._migrated)) {
+                try { fs.writeFileSync(dataJsonPath, JSON.stringify(raw, null, 2)); } catch(e) {}
+            }
+            /*----------------------
+            # ● 从 data.json 读取所有数据
+            ----------------------*/
+            var loadDataFromJson = function() {
+                try {
+                    if (!fs.existsSync(dataJsonPath)) {
+                        fs.writeFileSync(dataJsonPath, JSON.stringify({ items: [], important: [], settings: this.$store.state.settings }, null, 2));
+                    }
                     var raw = JSON.parse(fs.readFileSync(dataJsonPath).toString('utf8'));
-                    if (raw.settings) {
-                        applySettings(raw.settings);
-                        this.$store.state.settings = raw.settings;
-                    }
-                } catch(e) {}
-            }
-            this.$store.state.settings.dataPath = this.$store.state.settings.dataPath || PathManager.PROGRAMPATH;
-            // Merge default preview settings for upgrades from older data.json
-            var s = this.$store.state.settings;
-            if (!s.preview) this.$set(s, 'preview', {});
-            if (s.preview.ambientColor === undefined)     this.$set(s.preview, 'ambientColor', '#666666');
-            if (s.preview.directionalColor === undefined) this.$set(s.preview, 'directionalColor', '#887766');
-            if (s.preview.showAxis === undefined)         this.$set(s.preview, 'showAxis', true);
-            if (s.preview.autoRotate === undefined)       this.$set(s.preview, 'autoRotate', true);
-            if (s.preview.cameraFov === undefined)        this.$set(s.preview, 'cameraFov', 45);
-            if (s.preview.dualModel === undefined)        this.$set(s.preview, 'dualModel', false);
-            if (s.preview.buttonMode === undefined)      this.$set(s.preview, 'buttonMode', 'hover');
-            if (s.preview.pageSize === undefined)        this.$set(s.preview, 'pageSize', 20);
-            /*----------------------
-            # ● 自动创建所需文件夹
-            ----------------------*/
-            var dirs = [
-                PathManager.DATAPATH,
-                PathManager.MODELPATH,
-                PathManager.SCENEPATH,
-                PathManager.MMEPATH,
-                PathManager.VMDPATH,
-                PathManager.GAMEPATH,
-                PathManager.SOFTPATH,
-                PathManager.PROJECTPATH
-            ];
-            for (var i = 0; i < dirs.length; i++) {
-                try {
-                    if (!fs.existsSync(dirs[i])) {
-                        fs.mkdirSync(dirs[i], { recursive: true });
-                    }
-                } catch(e) {}
-            }
-            // Ensure data.json exists
-            if (!fs.existsSync(dataJsonPath)) {
-                console.log("Creating new data.json at:", dataJsonPath);
-                try {
-                    fs.writeFileSync(dataJsonPath, JSON.stringify({ important: [], settings: this.$store.state.settings }));
-                    console.log("data.json created successfully");
+                    window.store.state.important = raw.important || [];
+                    var items = raw.items || [];
+                    var data = { models: [], scenes: [], vmds: [], mmes: [], project: [] };
+                    var catMap = { '人物模型': 'models', '场景模型': 'scenes', '动作文件': 'vmds', 'MME特效': 'mmes' };
+                    var cats = (raw.settings && raw.settings.categories) || [];
+                    cats.forEach(function(c) { if (!catMap[c.name]) catMap[c.name] = c.type === 'motion' ? 'vmds' : c.type === 'effect' ? 'mmes' : 'models'; });
+                    var seenGroups = {};
+                    items.forEach(function(item, idx) {
+                        var key = catMap[item.category] || 'models';
+                        var groupName = item.group || window.path.basename(item.path).replace(/\.[^.]+$/, '');
+                        var idKey = key + '|' + groupName;
+                        if (!seenGroups[idKey]) {
+                            seenGroups[idKey] = { id: Object.keys(seenGroups).length, name: groupName, address: item.path ? window.path.dirname(item.path) + '/' : '', models: [], vmds: [], img: 'yes', type: 'no', info: { tags: [] } };
+                            data[key].push(seenGroups[idKey]);
+                        }
+                        var ext = window.path.extname(item.path).toLowerCase();
+                        if (ext === '.vmd') {
+                            seenGroups[idKey].vmds.push(item.path);
+                        } else {
+                            seenGroups[idKey].models.push(item.path);
+                        }
+                        // Aggregate per-item tags to group level
+                        if (item.tags && item.tags.length > 0) {
+                            var gInfo = seenGroups[idKey].info;
+                            if (!gInfo.tags) gInfo.tags = [];
+                            item.tags.forEach(function(t) {
+                                if (gInfo.tags.indexOf(t) < 0) gInfo.tags.push(t);
+                            });
+                            seenGroups[idKey].type = 'yes';
+                        }
+                    });
+                    this.$store.state.data = data;
+                    // Init bookmark map
+                    var bmInit = {};
+                    items.forEach(function(i) { if (i.bookmarked) bmInit[i.path] = true; });
+                    this._bookmarkedPaths = bmInit;
                 } catch(e) {
-                    console.log("data.json create failed:", e);
+                    console.error('Failed to load data.json:', e);
+                    this.$store.state.data = { models: [], scenes: [], vmds: [], mmes: [], project: [] };
                 }
-            }
-            // Rebuild native menu so folder shortcuts and software items reflect current paths
-            if (window.rebuildMenu) {
-                window.rebuildMenu();
-            }
-            /*----------------------
-            # ● 读取系统文件列表
-            ----------------------*/
-            window.fs.readFile(dataJsonPath, (err, data) => {
-                console.log("Read data.json:", err, !!data);
-                if (err || !data) return;
-                var rf = data.toString("utf8");
-                console.log("data.json content:", rf);
-                try { var rj = JSON.parse(rf); window.store.state.important = Array.isArray(rj) ? rj : (rj.important || []); } catch(e) {}
-            });
-            /*----------------------
-            # ● 读取人物模型文件列表
-            ----------------------*/
-            var models = fs.existsSync(PathManager.MODELPATH) ? fs.readdirSync(PathManager.MODELPATH) : [];
-            var temp = [];
-            var d = {};
-            for (let i = 0; i < models.length; i++) {
-                let d = { id: i, name: models[i], address: PathManager.MODELPATH + models[i] + "/", models: [] };
-                if (fs.lstatSync(PathManager.MODELPATH + models[i]).isDirectory) {
-                    let childF = fs.readdirSync(d.address);
-                    for (let j = 0; j < childF.length; j++) {
-                        //console.log(window.path.extname(childF[j]).toLowerCase())
-                        if (
-                            window.path.extname(childF[j]).toLowerCase() == ".pmx" ||
-                            window.path.extname(childF[j]).toLowerCase() == ".pmd" ||
-                            window.path.extname(childF[j]).toLowerCase() == ".x"
-                        ) {
-                            d.models.push(PathManager.MODELPATH + models[i] + "/" + childF[j]);
-                        }
-                    }
-                }
-                window.fs.exists(PathManager.MODELPATH + models[i] + "/info.json", function (exists) {
-                    //console.log(PathManager.MODELPATH + models[i] + "/info.json");
-                    if (exists) {
-                        window.fs.readFile(PathManager.MODELPATH + models[i] + "/info.json", (err, data) => {
-                            if (err || !data) return;
-                            var rf = data.toString("utf8");
-                            try { var rj = JSON.parse(rf); d["info"] = rj; } catch(e) {}
-                            //console.log(rj)
-                        });
-                        d.type = "yes";
-                    } else {
-                        d.type = "no";
-                    }
+            }.bind(this);
+            loadDataFromJson();
 
-                    //console.log(exists ? "创建成功" : "创建失败");
-                });
-                window.fs.exists(PathManager.MODELPATH + models[i] + "/image.png", function (exists) {
-                    //console.log(PathManager.MODELPATH + models[i] + "/image.png");
-                    if (exists) {
-                        d.img = "yes";
-                    } else {
-                        d.img = "no";
-                    }
-
-                    //console.log(exists ? "创建成功" : "创建失败");
-                });
-                temp.push(d);
-            }
-            this.$store.state.data.models = temp;
-            /*----------------------
-            # ● 读取MME文件列表
-            ----------------------*/
-            var mmes = fs.existsSync(PathManager.MMEPATH) ? fs.readdirSync(PathManager.MMEPATH) : [];
-            var temp = [];
-            for (let i = 0; i < mmes.length; i++) {
-                temp.push({ id: i, name: mmes[i], address: PathManager.MMEPATH + mmes[i] + "/" });
-            }
-            this.$store.state.data.mmes = temp;
-            /*----------------------
-            # ● 读取场景模型文件列表
-            ----------------------*/
-            var scenes = fs.existsSync(PathManager.SCENEPATH) ? fs.readdirSync(PathManager.SCENEPATH) : [];
-            var temp = [];
-            for (let i = 0; i < scenes.length; i++) {
-                let d = { id: i, name: scenes[i], address: PathManager.SCENEPATH + scenes[i] + "/", models: [] };
-                if (fs.lstatSync(PathManager.SCENEPATH + scenes[i]).isDirectory) {
-                    let childF = fs.readdirSync(d.address);
-                    for (let j = 0; j < childF.length; j++) {
-                        //console.log(window.path.extname(childF[j]).toLowerCase())
-                        if (
-                            window.path.extname(childF[j]).toLowerCase() == ".pmx" ||
-                            window.path.extname(childF[j]).toLowerCase() == ".pmd" ||
-                            window.path.extname(childF[j]).toLowerCase() == ".x"
-                        ) {
-                            d.models.push(PathManager.SCENEPATH + scenes[i] + "/" + childF[j]);
-                        }
-                    }
-                }
-                window.fs.exists(PathManager.SCENEPATH + scenes[i] + "/info.json", function (exists) {
-                    if (exists) {
-                        window.fs.readFile(PathManager.SCENEPATH + scenes[i] + "/info.json", (err, data) => {
-                            if (err || !data) return;
-                            var rf = data.toString("utf8");
-                            try { var rj = JSON.parse(rf); d["info"] = rj; } catch(e) {}
-                            //console.log(rj)
-                        });
-                        d.type = "yes";
-                    } else {
-                        d.type = "no";
-                    }
-
-                    //console.log(exists ? "创建成功" : "创建失败");
-                });
-                window.fs.exists(PathManager.SCENEPATH + scenes[i] + "/image.png", function (exists) {
-                    if (exists) {
-                        d.img = "yes";
-                    } else {
-                        d.img = "no";
-                    }
-
-                    //console.log(exists ? "创建成功" : "创建失败");
-                });
-                temp.push(d);
-            }
-            console.log(temp);
-            this.$store.state.data.scenes = temp;
-            /*----------------------
-            # ● 读取动作文件列表
-            ----------------------*/
-            var vmdEntries = fs.existsSync(PathManager.VMDPATH) ? fs.readdirSync(PathManager.VMDPATH) : [];
-            var temp = [];
-            for (let i = 0; i < vmdEntries.length; i++) {
-                var entryPath = PathManager.VMDPATH + vmdEntries[i];
-                var d = { id: i, name: vmdEntries[i], address: PathManager.VMDPATH + vmdEntries[i] + "/", vmds: [] };
-                var entryStat = fs.lstatSync(entryPath);
-                if (entryStat.isFile && window.path.extname(vmdEntries[i]).toLowerCase() === ".vmd") {
-                    d.vmds.push(entryPath);
-                } else if (entryStat.isDirectory) {
-                    var subFiles = fs.readdirSync(entryPath + "/");
-                    for (let j = 0; j < subFiles.length; j++) {
-                        if (window.path.extname(subFiles[j]).toLowerCase() === ".vmd") {
-                            d.vmds.push(entryPath + "/" + subFiles[j]);
-                        }
-                    }
-                }
-                temp.push(d);
-            }
-            this.$store.state.data.vmds = temp;
-            /*----------------------
-            # ● 读取工程文件列表
-            ----------------------*/
-            var project = fs.existsSync(PathManager.PROJECTPATH) ? fs.readdirSync(PathManager.PROJECTPATH) : [];
-            var temp = [];
-            for (let i = 0; i < project.length; i++) {
-                if (window.path.extname(project[i]).toLowerCase() == ".pmm") {
-                    temp.push({ id: i, name: project[i], address: PathManager.PROJECTPATH + project[i] + "/" });
-                }
-            }
-            this.$store.state.data.project = temp;
-            /*----------------------
-            # ● 读取软件列表
-            ----------------------*/
-            window.fs.readFile(PathManager.SOFTPATH + "software.json", (err, data) => {
-                if (err || !data) return;
-                var rf = data.toString("utf8");
-                console.log(rf);
-                try { var rj = JSON.parse(rf); window.store.state.software = rj; } catch(e) {}
-                console.log(rj);
-            });
             /*----------------------
             # ● 进入主菜单
             ----------------------*/
@@ -297,6 +234,31 @@ var componentIndex = {
             currentPageScenes: 1,
             currentPageMmes: 1,
             currentPageVmds: 1,
+            currentCategory: '',
+            categoryDialogVisible: false,
+            categoryDialogTitle: '',
+            categoryForm: { name: '', extensions: '', parent: '' },
+            categoryEditIndex: -1,
+            newTagInput: '',
+            tagEditDialogVisible: false,
+            tagEditModelPath: '',
+            tagEditCategory: '',
+            tagEditSelected: [],
+            tagEditGroup: null,
+            tagEditNsfw: false,
+            dataPathDialogVisible: false,
+            dataPathEditingIndex: -1,
+            dataPathForm: { path: '', category: '人物模型', tags: '' },
+            settingsDialogVisible: false,
+            helpDialogVisible: false,
+            _itemCategoryCache: null,
+            _bookmarkVersion: 0,
+            _bookmarkedPaths: {},
+            searchText: '',
+            activeFilters: [], // [{type: 'tag', value: 'xxx'}, {type: 'category', value: 'xxx'}]
+            searchSuggestions: [],
+            suggestionVisible: false,
+            suggestionIndex: -1,
         };
     },
     computed: {
@@ -310,18 +272,23 @@ var componentIndex = {
         },
         search: {
             get() {
-                return this.$store.state.search;
+                return this.searchText;
             },
             set(value) {
-                this.$store.commit("search", value);
+                this.searchText = value;
             },
         },
         tag: {
             get() {
-                return this.$store.state.tag;
+                var tagFilter = this.activeFilters.filter(function(f) { return f.type === 'tag'; });
+                return tagFilter.length > 0 ? tagFilter[tagFilter.length - 1].value : '';
             },
             set(value) {
-                this.$store.commit("tag", value);
+                if (value) {
+                    if (!this.activeFilters.some(function(f) { return f.type === 'tag' && f.value === value; })) {
+                        this.activeFilters.push({ type: 'tag', value: value });
+                    }
+                }
             },
         },
         showPath: {
@@ -333,64 +300,16 @@ var componentIndex = {
             },
         },
         models: {
-            get() {
-                if (this.search == "" && this.tag == "") {
-                    return this.mData.models;
-                } else if (this.search != "" && this.tag == "") {
-                    return this.mData.models.filter((item) => {
-                        return this.isSubStr(item);
-                    });
-                } else if (this.search == "" && this.tag != "") {
-                    return this.mData.models.filter((item) => {
-                        return this.isHasTag(item);
-                    });
-                } else if (this.search != "" && this.tag != "") {
-                    return this.mData.models.filter((item) => {
-                        return this.isHasTag(item) && this.isSubStr(item);
-                    });
-                }
-            },
+            get() { return this.applyFilters(this.mData.models); },
         },
         scenes: {
-            get() {
-                if (this.search == "" && this.tag == "") {
-                    return this.mData.scenes;
-                } else if (this.search != "" && this.tag == "") {
-                    return this.mData.scenes.filter((item) => {
-                        return this.isSubStr(item);
-                    });
-                } else if (this.search == "" && this.tag != "") {
-                    return this.mData.scenes.filter((item) => {
-                        return this.isHasTag(item);
-                    });
-                } else if (this.search != "" && this.tag != "") {
-                    return this.mData.scenes.filter((item) => {
-                        return this.isHasTag(item) && this.isSubStr(item);
-                    });
-                }
-            },
+            get() { return this.applyFilters(this.mData.scenes); },
         },
         mmes: {
-            get() {
-                if (this.search == "") {
-                    return this.mData.mmes;
-                } else {
-                    return this.mData.mmes.filter((item) => {
-                        return this.isSubStr(item);
-                    });
-                }
-            },
+            get() { return this.applyFilters(this.mData.mmes); },
         },
         vmds: {
-            get() {
-                if (this.search == "") {
-                    return this.mData.vmds;
-                } else {
-                    return this.mData.vmds.filter((item) => {
-                        return this.isSubStr(item);
-                    });
-                }
-            },
+            get() { return this.applyFilters(this.mData.vmds); },
         },
         important: {
             get() {
@@ -411,6 +330,47 @@ var componentIndex = {
         importProgress: {
             get() { return window._importProgress || {}; },
         },
+        categories: {
+            get() { return this.$store.state.settings.categories || []; },
+        },
+        topCategories: {
+            // Top-level categories for tab generation
+            get() {
+                return this.categories.filter(function(c) { return !c.parent; });
+            },
+        },
+        categoryDataMap: {
+            // Map category name → store data key
+            get() {
+                var map = {};
+                map['人物模型'] = 'models';
+                map['场景模型'] = 'scenes';
+                map['动作文件'] = 'vmds';
+                map['MME特效'] = 'mmes';
+                // Also map custom categories by their own name
+                (this.categories).forEach(function(c) {
+                    if (!map[c.name]) map[c.name] = c.name;
+                });
+                return map;
+            },
+        },
+        currentCategoryObj: {
+            get() {
+                // Always return null to show all data. Category filtering is done by applyFilters.
+                return null;
+            },
+        },
+        categoryTree: {
+            get() {
+                var cats = this.categories;
+                function buildTree(parent) {
+                    return cats.filter(function(c) { return c.parent === parent; }).map(function(c) {
+                        return { name: c.name, label: c.name, extensions: c.extensions, parent: c.parent, children: buildTree(c.name) };
+                    });
+                }
+                return buildTree('');
+            },
+        },
         pageSize: {
             get() {
                 var s = this.$store.state.settings;
@@ -429,6 +389,42 @@ var componentIndex = {
         pagedVmds: {
             get() { return this.paginate(this.vmds, this.currentPageVmds); },
         },
+        monitoredExtensions: {
+            get() {
+                var exts = [];
+                var seen = {};
+                (this.categories || []).forEach(function(c) {
+                    (c.extensions || '').split(',').forEach(function(e) {
+                        e = e.trim().toLowerCase();
+                        if (e && !seen[e]) { seen[e] = true; exts.push(e); }
+                    });
+                });
+                return exts.join(',');
+            },
+        },
+        gridItems: {
+            get() {
+                var _trigger = this._bookmarkVersion; // re-evaluate on edit
+                var self = this;
+                var data = this.getCategoryData(this.currentCategoryObj);
+                var items = [];
+                data.forEach(function (group) {
+                    var models = group.models || [];
+                    models.forEach(function (mp) {
+                        items.push({
+                            path: mp,
+                            modelName: window.path.basename(mp).replace(/\.[^.]+$/, ''),
+                            groupName: group.name,
+                            groupInfo: group.info,
+                            groupType: group.type,
+                            category: self._getItemCategory(mp),
+                            group: group,
+                        });
+                    });
+                });
+                return items;
+            },
+        },
     },
     methods: {
         paginate: function(arr, page) {
@@ -439,30 +435,77 @@ var componentIndex = {
         open: function (address) {
             window.shell.openPath(address);
         },
-        vip: function (data, type) {
-            data.type = type;
-            this.$store.state.important.push(data);
-            this.message("收藏成功");
-            this.save();
+        vip: function (modelPath) {
+            // Toggle bookmark for a single model
+            var self = this;
+            var dp = PathManager.getDataFullPath();
+            var data = {};
+            if (fs.existsSync(dp)) {
+                try { data = JSON.parse(fs.readFileSync(dp).toString('utf8')); } catch(e) {}
+            }
+            if (!data.items) data.items = [];
+            var item = data.items.find(function(i) { return i.path === modelPath; });
+            var newState = !(item && item.bookmarked);
+            if (item) {
+                item.bookmarked = newState;
+            } else {
+                data.items.push({ path: modelPath, bookmarked: newState, category: '', group: '' });
+            }
+            data.settings = self.settings;
+            fs.writeFileSync(dp, JSON.stringify(data, null, 2));
+            self._invalidateItemCategoryCache();
+            var bm = {};
+            (data.items || []).forEach(function(i) { if (i.bookmarked) bm[i.path] = true; });
+            self._bookmarkedPaths = bm;
+            self._bookmarkVersion = (self._bookmarkVersion || 0) + 1;
+            self.$forceUpdate();
+            self.message(newState ? "已收藏" : "已取消收藏");
+        },
+        isBookmarked: function(modelPath) {
+            if (!modelPath) return false;
+            var bm = this._bookmarkedPaths;
+            if (!bm) {
+                this._bookmarkedPaths = {};
+                try {
+                    var dp = PathManager.getDataFullPath();
+                    var raw = JSON.parse(fs.readFileSync(dp).toString('utf8'));
+                    (raw.items || []).forEach(function(i) {
+                        if (i.bookmarked) this._bookmarkedPaths[i.path] = true;
+                    }.bind(this));
+                } catch(e) {}
+                bm = this._bookmarkedPaths;
+            }
+            return !!bm[modelPath];
+        },
+        _isItemNsfw: function(mp) {
+            var cache = this._itemCategoryCache;
+            if (!cache) { this._getItemCategory(mp); cache = this._itemCategoryCache; }
+            return cache && !!cache['__nsfw__' + mp];
+        },
+        _getItemBookmarked: function(mp) {
+            var cache = this._itemCategoryCache;
+            if (!cache) { this._getItemCategory(mp); cache = this._itemCategoryCache; }
+            return cache && cache['__bm__' + mp];
         },
         del: function (id) {
-            for (let i = 0; i < this.$store.state.important.length; i++) {
-                if (id == this.$store.state.important[i].id) {
-                    this.$store.state.important.splice(i, 1);
-                }
-            }
-            this.message("删除成功");
-            this.save();
+            // No longer needed — handled by vip toggle
         },
         save: function () {
-            var data = {
-                important: this.$store.state.important,
-                settings: this.$store.state.settings
-            };
-            window.fs.writeFile(PathManager.getDataFullPath(), JSON.stringify(data), (err) => {
+            var dp = PathManager.getDataFullPath();
+            var data = {};
+            if (fs.existsSync(dp)) {
+                try { data = JSON.parse(fs.readFileSync(dp).toString('utf8')); } catch(e) {}
+            }
+            data.important = this.$store.state.important;
+            data.settings = this.$store.state.settings;
+            data.version = '1.0';
+            window.fs.writeFile(dp, JSON.stringify(data), (err) => {
                 if (err) throw err;
                 this.message("保存成功");
             });
+        },
+        openParent: function(fp) {
+            window.shell.openPath(window.path.dirname(fp));
         },
         copy: function (data) {
             window.clipboard.writeText(data);
@@ -500,33 +543,288 @@ var componentIndex = {
         getVmdsNum: function () {
             return this.vmds ? this.vmds.length : 0;
         },
-        changeTag: function (item) {
-            this.tag = item;
+        changeTag: function (tagName) {
+            if (!this.activeFilters.some(function(f) { return f.type === 'tag' && f.value === tagName; })) {
+                this.activeFilters = this.activeFilters.concat([{ type: 'tag', value: tagName }]);
+            }
         },
-        clearTag: function () {
-            this.tag = "";
+        filterByCategory: function(catName) {
+            if (!this.activeFilters.some(function(f) { return f.type === 'category' && f.value === catName; })) {
+                this.activeFilters = this.activeFilters.concat([{ type: 'category', value: catName }]);
+            }
+        },
+        removeFilter: function(idx) {
+            var arr = this.activeFilters.slice();
+            arr.splice(idx, 1);
+            this.activeFilters = arr;
+        },
+        clearFilters: function () {
+            this.activeFilters = [];
+            this.searchText = '';
+        },
+        onSearchKeydown: function(e) {
+            if (e.key === 'Backspace' && this.searchText === '' && this.activeFilters.length > 0 && !this.suggestionVisible) {
+                e.preventDefault();
+                this.activeFilters = this.activeFilters.slice(0, -1);
+                return;
+            }
+            if (!this.suggestionVisible || this.searchSuggestions.length === 0) return;
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                this.suggestionIndex = Math.min(this.suggestionIndex + 1, this.searchSuggestions.length - 1);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (this.suggestionIndex <= 0) {
+                    this.suggestionIndex = -1;
+                } else {
+                    this.suggestionIndex--;
+                }
+            } else if (e.key === 'Enter' && this.suggestionIndex >= 0) {
+                e.preventDefault();
+                this.selectSuggestion(this.searchSuggestions[this.suggestionIndex]);
+            } else if (e.key === 'Escape') {
+                this.suggestionVisible = false;
+                this.searchSuggestions = [];
+                this.suggestionIndex = -1;
+            }
+        },
+        onSearchInput: function() {
+            this.suggestionIndex = -1;
+            var text = this.searchText;
+            var idx = text.lastIndexOf('@');
+            var hashIdx = text.lastIndexOf('#');
+            var dollarIdx = text.lastIndexOf('$');
+            var exclIdx = text.lastIndexOf('!');
+            if (dollarIdx >= 0 && dollarIdx > idx && dollarIdx > hashIdx && dollarIdx > exclIdx) {
+                this.suggestionVisible = true;
+                this.searchSuggestions = [{ type: 'bookmark', value: 'bookmark', label: '$ 已收藏' }];
+            } else if (exclIdx >= 0 && exclIdx > idx && exclIdx > hashIdx && exclIdx > dollarIdx) {
+                var isDouble = text.indexOf('!!') >= 0;
+                this.suggestionVisible = true;
+                this.searchSuggestions = [
+                    { type: 'nsfw', value: 'nsfw', label: '! 显示全部(含NSFW)' },
+                    { type: 'nsfwOnly', value: 'nsfwOnly', label: '!! 只显示NSFW' }
+                ];
+            } else if (idx >= 0 && idx > hashIdx && idx > dollarIdx && idx > exclIdx) {
+                var prefix = text.slice(idx + 1).toLowerCase();
+                this.suggestionVisible = true;
+                this.searchSuggestions = this.categories
+                    .filter(function(c) { return c.name.toLowerCase().indexOf(prefix) >= 0; })
+                    .map(function(c) { return { type: 'category', value: c.name, label: '@' + c.name }; });
+            } else if (hashIdx >= 0) {
+                var tagPrefix = text.slice(hashIdx + 1).toLowerCase();
+                this.suggestionVisible = true;
+                var tags = this.settings.tags || [];
+                this.searchSuggestions = tags
+                    .filter(function(t) { return t.toLowerCase().indexOf(tagPrefix) >= 0; })
+                    .map(function(t) { return { type: 'tag', value: t, label: '#' + t }; });
+            } else {
+                this.suggestionVisible = false;
+                this.searchSuggestions = [];
+            }
+        },
+        selectSuggestion: function(s) {
+            if (!this.activeFilters.some(function(f) { return f.type === s.type && f.value === s.value; })) {
+                this.activeFilters = this.activeFilters.concat([{ type: s.type, value: s.value }]);
+            }
+            // Remove the @xxx, #xxx, or $ from search text
+            var text = this.searchText;
+            var trigger = s.type === 'category' ? '@' : (s.type === 'bookmark' ? '$' : (s.type === 'nsfw' || s.type === 'nsfwOnly' ? '!' : '#'));
+            var idx = (s.type === 'bookmark' || s.type === 'nsfw' || s.type === 'nsfwOnly') ? text.lastIndexOf(trigger) : text.lastIndexOf(trigger + s.value);
+            if (idx === -1) {
+                idx = text.lastIndexOf(trigger);
+            }
+            if (idx >= 0) {
+                var before = text.slice(0, idx);
+                // Also remove up to next space or end
+                var afterIdx = idx + 1 + s.value.length;
+                this.searchText = (before + text.slice(afterIdx)).trim();
+            }
+            this.suggestionVisible = false;
+            this.searchSuggestions = [];
+        },
+        applyFilters: function(arr) {
+            var self = this;
+            var result = arr;
+            var text = self.searchText || '';
+            var cleanText = text.replace(/[$@#!][^\s]*/g, '').trim();
+            if (cleanText) {
+                var term = cleanText.toLowerCase();
+                result = result.filter(function(item) {
+                    return item.name.toLowerCase().indexOf(term) !== -1;
+                });
+            }
+            // NSFW filtering: default hide, ! shows all, !! shows only NSFW
+            var hasNsfwFilter = self.activeFilters.some(function(f) { return f.type === 'nsfw'; });
+            var hasNsfwOnlyFilter = self.activeFilters.some(function(f) { return f.type === 'nsfwOnly'; });
+            if (hasNsfwOnlyFilter) {
+                result = result.filter(function(group) {
+                    var models = group.models || [];
+                    return models.some(function(mp) { return self._isItemNsfw(mp); });
+                });
+            } else if (!hasNsfwFilter) {
+                result = result.filter(function(group) {
+                    var models = group.models || [];
+                    return models.some(function(mp) { return !self._isItemNsfw(mp); });
+                });
+            }
+            self.activeFilters.forEach(function(f) {
+                if (f.type === 'tag') {
+                    result = result.filter(function(item) {
+                        return item.info && item.info.tags && item.info.tags.indexOf(f.value) >= 0;
+                    });
+                }
+                if (f.type === 'category') {
+                    var filterName = f.value;
+                    result = result.filter(function(group) {
+                        var models = group.models || [];
+                        return models.some(function(mp) {
+                            var cat = self._getItemCategory(mp);
+                            if (!cat) cat = self._deriveCategoryFromStore(mp);
+                            if (!cat) return false;
+                            if (cat === filterName) return true;
+                            return self._isCategoryDescendant(cat, filterName);
+                        });
+                    });
+                }
+                if (f.type === 'bookmark') {
+                    result = result.filter(function(group) {
+                        var models = group.models || [];
+                        return models.some(function(mp) {
+                            return self._getItemBookmarked(mp);
+                        });
+                    });
+                }
+            });
+            return result;
+        },
+        editTag: function (modelPath, group) {
+            this.tagEditModelPath = modelPath;
+            this.tagEditGroup = group;
+            this.tagEditSelected = [];
+            this.tagEditCategory = '';
+            this.tagEditNsfw = false;
+            var dp = PathManager.getDataFullPath();
+            try {
+                var raw = JSON.parse(fs.readFileSync(dp).toString('utf8'));
+                (raw.items || []).forEach(function (item) {
+                    if (item.path === modelPath) {
+                        this.tagEditCategory = item.category || '';
+                        this.tagEditSelected = item.tags ? item.tags.slice() : [];
+                        this.tagEditNsfw = !!item.nsfw;
+                    }
+                }.bind(this));
+            } catch(e) {}
+            if (!this.tagEditCategory) {
+                this.tagEditCategory = this.currentCategory || '';
+            }
+            this.tagEditDialogVisible = true;
+        },
+        saveTagEdit: function () {
+            var self = this;
+            var dp = PathManager.getDataFullPath();
+            var data = {};
+            if (fs.existsSync(dp)) {
+                try { data = JSON.parse(fs.readFileSync(dp).toString('utf8')); } catch(e) {}
+            }
+            if (!data.items) data.items = [];
+            var found = false;
+            data.items.forEach(function (item) {
+                if (item.path === self.tagEditModelPath) {
+                    item.category = self.tagEditCategory;
+                    item.tags = self.tagEditSelected.slice();
+                    item.nsfw = self.tagEditNsfw;
+                    found = true;
+                }
+            });
+            if (!found) {
+                data.items.push({
+                    path: self.tagEditModelPath,
+                    category: self.tagEditCategory,
+                    group: window.path.basename(window.path.dirname(self.tagEditModelPath)),
+                    tags: self.tagEditSelected.slice(),
+                    nsfw: self.tagEditNsfw
+                });
+            }
+            data.settings = self.settings;
+            data.important = self.important;
+            fs.writeFileSync(dp, JSON.stringify(data, null, 2));
+            self.tagEditDialogVisible = false;
+            self._invalidateItemCategoryCache();
+            self._bookmarkVersion = (self._bookmarkVersion || 0) + 1;
+            self.$forceUpdate();
+            // Update the group info directly instead of full reload
+            var group = self.tagEditGroup;
+            if (group) {
+                if (!group.info) self.$set(group, 'info', {});
+                if (!group.info.tags) self.$set(group.info, 'tags', []);
+                // Merge tags from edited item
+                var newTags = self.tagEditSelected;
+                newTags.forEach(function(t) {
+                    if (group.info.tags.indexOf(t) < 0) group.info.tags.push(t);
+                });
+                if (group.info.tags.length > 0) {
+                    self.$set(group, 'type', 'yes');
+                }
+            }
+            self.message('已更新');
+        },
+        addTag: function () {
+            var name = this.newTagInput.trim();
+            if (!name) return;
+            var tags = this.settings.tags || [];
+            if (tags.indexOf(name) >= 0) {
+                this.message('标签已存在', 'warning');
+                return;
+            }
+            tags = tags.concat([name]);
+            this.settings = Object.assign({}, this.settings, { tags: tags });
+            this.newTagInput = '';
+        },
+        deleteTag: function (idx) {
+            var tags = (this.settings.tags || []).slice();
+            tags.splice(idx, 1);
+            this.settings = Object.assign({}, this.settings, { tags: tags });
         },
         updateModel: function (path) {
             var self = this;
-            var isScene = path.indexOf(PathManager.SCENEPATH) === 0;
-            var dualMode = self.settings.preview && self.settings.preview.dualModel;
+            // Determine model's category
+            var modelCat = self._getItemCategory(path);
+            if (!modelCat) modelCat = self._deriveCategoryFromStore(path);
+            var coexist = self.settings.preview && self.settings.preview.coexistCategories || [];
+            // Check if new model's category can coexist with existing
+            var newCanCoexist = coexist.indexOf(modelCat) >= 0;
+            var existingCanCoexist = false;
+            if (window.model) {
+                var ec = self._getItemCategory(window.model.userData.modelPath);
+                if (!ec) ec = self._deriveCategoryFromStore(window.model.userData.modelPath);
+                existingCanCoexist = coexist.indexOf(ec) >= 0;
+            }
+            if (window.sceneModel) {
+                var ec2 = self._getItemCategory(window.sceneModel.userData.modelPath);
+                if (!ec2) ec2 = self._deriveCategoryFromStore(window.sceneModel.userData.modelPath);
+                existingCanCoexist = existingCanCoexist || (coexist.indexOf(ec2) >= 0);
+            }
 
             if (this.showPath != path) {
-                // Remove only the same type when dual mode is on
-                if (dualMode) {
-                    if (isScene && window.sceneModel) {
+                // Remove models that can't coexist with the new one
+                if (newCanCoexist) {
+                    // Only remove same-category models
+                    if (window.model && self._getItemCategory(window.model.userData.modelPath) === modelCat) {
+                        window.scene.remove(window.model);
+                        clearCache(window.model);
+                    }
+                    if (window.sceneModel && self._getItemCategory(window.sceneModel.userData.modelPath) === modelCat) {
                         window.scene.remove(window.sceneModel);
                         clearCache(window.sceneModel);
-                    } else if (!isScene && window.model) {
-                        window.scene.remove(window.model);
-                        clearCache(window.model);
                     }
                 } else {
-                    if (window.model) {
+                    // Remove non-coexisting models
+                    if (window.model && !(coexist.indexOf(self._getItemCategory(window.model.userData.modelPath) || self._deriveCategoryFromStore(window.model.userData.modelPath)) >= 0)) {
                         window.scene.remove(window.model);
                         clearCache(window.model);
                     }
-                    if (window.sceneModel) {
+                    if (window.sceneModel && !(coexist.indexOf(self._getItemCategory(window.sceneModel.userData.modelPath) || self._deriveCategoryFromStore(window.sceneModel.userData.modelPath)) >= 0)) {
                         window.scene.remove(window.sceneModel);
                         clearCache(window.sceneModel);
                     }
@@ -537,15 +835,11 @@ var componentIndex = {
                     window.loader.MMDLoader.loadModel(
                         path,
                         function (mmd) {
-                            if (dualMode && isScene) {
-                                loadSceneModel(mmd);
-                            } else {
-                                window.model = mmd;
-                                mmd.userData.modelPath = path;
-                                window.scene.add(window.model);
-                                setupModel(mmd, false);
-                                resetCamera();
-                            }
+                            window.model = mmd;
+                            mmd.userData.modelPath = path;
+                            window.scene.add(window.model);
+                            setupModel(mmd, false);
+                            resetCamera();
                             self._capturePreviewAfterLoad(path);
                         },
                         window.onProgress,
@@ -555,15 +849,11 @@ var componentIndex = {
                     window.loader.XLoader.load(
                         path,
                         function (x) {
-                            if (dualMode && isScene) {
-                                loadSceneModel(x);
-                            } else {
-                                window.model = x;
-                                x.userData.modelPath = path;
-                                window.scene.add(window.model);
-                                setupModel(x, false);
-                                resetCamera();
-                            }
+                            window.model = x;
+                            x.userData.modelPath = path;
+                            window.scene.add(window.model);
+                            setupModel(x, false);
+                            resetCamera();
                             self._capturePreviewAfterLoad(path);
                         },
                         window.onProgress,
@@ -578,28 +868,47 @@ var componentIndex = {
             }
             $("#modelButton").click();
         },
+        _getDefaultModelPath: function() {
+            var mode = (this.settings.preview && this.settings.preview.defaultModelMode) || 'custom';
+            // Collect all model paths
+            var allModels = [];
+            var data = this.$store.state.data;
+            ['models', 'scenes'].forEach(function(k) {
+                (data[k] || []).forEach(function(g) {
+                    (g.models || []).forEach(function(mp) {
+                        allModels.push(mp);
+                    });
+                });
+            });
+            if (mode === 'random' && allModels.length > 0) {
+                return allModels[Math.floor(Math.random() * allModels.length)];
+            }
+            if (mode === 'first' && allModels.length > 0) {
+                return allModels[0];
+            }
+            // custom mode
+            return this.settings.defaultModelPath || (allModels.length > 0 ? allModels[0] : '');
+        },
         playVmd: function (vmdPath) {
             var self = this;
             if (!window.model) {
-                var defaultPath = self.settings.defaultModelPath;
+                var defaultPath = self._getDefaultModelPath();
                 if (!defaultPath) {
-                    self.message("请先在人物模型中选择并加载模型，或在设置中配置默认模型路径");
+                    self.message("请先加载模型或导入模型文件");
                     return;
                 }
-                self.message("正在加载默认模型...");
+                self.message("正在加载模型...");
                 window.loader.MMDLoader.loadModel(defaultPath, function(mmd) {
                     window.model = mmd;
                     mmd.userData.modelPath = defaultPath;
                     model = mmd;
                     window.scene.add(window.model);
                     setupModel(mmd);
-                    // Wait one frame for mmdHelper to fully initialize the model's
-                    // animation mixer before pouring VMD data into it
                     requestAnimationFrame(function() {
                         self._loadVmd(vmdPath);
                     });
                 }, window.onProgress, function() {
-                    self.message("默认模型加载失败");
+                    self.message("模型加载失败");
                 });
                 return;
             }
@@ -641,59 +950,243 @@ var componentIndex = {
             );
         },
         selectDataPath: function() {
+            this.dataPathEditingIndex = -1;
+            this.dataPathForm = { path: this.settings.dataPath || '', category: '人物模型', tags: '' };
+            this.dataPathDialogVisible = true;
+        },
+        editDataPath: function(idx) {
+            this.dataPathEditingIndex = idx;
+            var p = this.settings.dataPaths[idx];
+            this.dataPathForm = {
+                path: p.path,
+                category: p.category || '人物模型',
+                tags: (p.tags || []).join(', ')
+            };
+            this.dataPathDialogVisible = true;
+        },
+        dataPathDialogPickFolder: function() {
             var self = this;
-            var currentPath = self.settings.dataPath || PathManager.PROGRAMPATH;
-            window.dialog.openDirectory(currentPath).then(function(result) {
-                if (result) {
-                    self.settings = Object.assign({}, self.settings, { dataPath: result });
-                }
+            window.dialog.openDirectory(self.dataPathForm.path || '').then(function(result) {
+                if (result) self.dataPathForm.path = result;
             });
         },
+        confirmDataPath: function() {
+            if (!this.dataPathForm.path) return;
+            var paths = this.settings.dataPaths.slice();
+            var entry = {
+                path: this.dataPathForm.path,
+                category: this.dataPathForm.category || '人物模型',
+                tags: (this.dataPathForm.tags || '').split(',').map(function(t) { return t.trim(); }).filter(function(t) { return t; })
+            };
+            if (this.dataPathEditingIndex >= 0) {
+                paths[this.dataPathEditingIndex] = entry;
+            } else if (!paths.some(function(p) { return p.path === entry.path; })) {
+                paths.push(entry);
+            }
+            this.settings = Object.assign({}, this.settings, { dataPaths: paths });
+            this.dataPathDialogVisible = false;
+        },
+        removeDataPath: function(idx) {
+            var paths = this.settings.dataPaths.slice();
+            if (paths.length <= 1) {
+                this.message('至少保留一个数据路径', 'warning');
+                return;
+            }
+            paths.splice(idx, 1);
+            this.settings = Object.assign({}, this.settings, { dataPaths: paths });
+        },
         selectDefaultModel: function() {
+            // Build list of all available models
             var self = this;
-            var currentPath = self.settings.defaultModelPath || PathManager.MODELPATH;
-            window.dialog.openFile(currentPath, [{ name: 'MMD模型', extensions: ['pmx', 'pmd'] }]).then(function(result) {
-                if (result) {
-                    self.settings = Object.assign({}, self.settings, { defaultModelPath: result });
+            var options = [];
+            var data = this.$store.state.data;
+            ['models', 'scenes'].forEach(function(k) {
+                (data[k] || []).forEach(function(g) {
+                    (g.models || []).forEach(function(mp) {
+                        var name = window.path.basename(mp);
+                        options.push({ label: name + ' (' + g.name + ')', value: mp });
+                    });
+                });
+            });
+            if (options.length === 0) {
+                self.message('没有可用的模型');
+                return;
+            }
+            // Use a simple selection via Element UI's $confirm with a select or just show a custom dialog
+            // For simplicity, use a message box approach with a list
+            var h = this.$createElement;
+            var selectRef = null;
+            var selected = self.settings.defaultModelPath || (options[0] && options[0].value);
+            var vm = this.$msgbox({
+                title: '选择默认模型',
+                message: h('div', { style: 'min-width:400px' }, [
+                    h('el-select', {
+                        ref: 'sel',
+                        props: { value: selected, filterable: true, placeholder: '搜索模型...' },
+                        style: 'width:100%',
+                        on: { input: function(v) { selected = v; } }
+                    }, options.map(function(o) {
+                        return h('el-option', { props: { key: o.value, label: o.label, value: o.value } });
+                    }))
+                ]),
+                showCancelButton: true,
+                confirmButtonText: '确定',
+                beforeClose: function(action, instance, done) {
+                    if (action === 'confirm') {
+                        self.settings = Object.assign({}, self.settings, { defaultModelPath: selected });
+                    }
+                    done();
                 }
             });
         },
         saveSettings: function() {
             var self = this;
-            var dataPath = PathManager.getDataFullPath();
-            // Read existing data.json to preserve important array
+            var dataJsonPath = PathManager.getDataFullPath();
             var existing = { important: self.important };
-            if (fs.existsSync(dataPath)) {
-                try {
-                    existing = JSON.parse(fs.readFileSync(dataPath).toString('utf8'));
-                } catch(e) {}
+            if (fs.existsSync(dataJsonPath)) {
+                try { existing = JSON.parse(fs.readFileSync(dataJsonPath).toString('utf8')); } catch(e) {}
+            }
+            var paths = self.settings.dataPaths || [];
+            if (paths.length > 0) {
+                self.settings.dataPath = paths[0].path;
             }
             existing.settings = self.settings;
             try {
-                fs.writeFileSync(dataPath, JSON.stringify(existing, null, 2));
-                // Apply immediately — no refresh needed
-                if (self.settings.dataPath) {
-                    PathManager.PROGRAMPATH = self.settings.dataPath;
-                    // Update data dirs for current session
-                    var dirs = [
-                        path.join(self.settings.dataPath, 'data'),
-                        path.join(self.settings.dataPath, 'software'),
-                        path.join(self.settings.dataPath, 'project')
-                    ];
-                    for (var i = 0; i < dirs.length; i++) {
-                        try { if (!fs.existsSync(dirs[i])) fs.mkdirSync(dirs[i], { recursive: true }); } catch(e) {}
-                    }
+                fs.writeFileSync(dataJsonPath, JSON.stringify(existing, null, 2));
+                if (paths.length > 0) {
                 }
-                self.message("配置已保存，数据刷新中...");
-                // Refresh to reload file lists from potentially new dataPath
-                setTimeout(function () { router.replace('/'); }, 500);
+                // Clean up items with non-monitored extensions
+                self._cleanUnmonitoredItems();
+                self._invalidateItemCategoryCache();
+                self._bookmarkVersion = (self._bookmarkVersion || 0) + 1;
+                self._reloadDataJson();
+                self.$forceUpdate();
+                self.message("配置已保存");
             } catch(e) {
                 self.message("保存失败: " + e.message);
             }
         },
+        _reloadData: function() {
+            var self = this;
+            var pendingPreviews = [];
+            var m = [], s = [], mm = [], v = [];
+            var seenPaths = {};
+            function scanModelDir(dirPath, list) {
+                if (!fs.existsSync(dirPath)) return;
+                var entries = fs.readdirSync(dirPath);
+                for (var i = 0; i < entries.length; i++) {
+                    var full = dirPath + entries[i];
+                    var stat;
+                    try { stat = fs.lstatSync(full); } catch(e) { continue; }
+                    if (stat.isDirectory) {
+                        // Scan subdirectory for models (works for both modes)
+                        var d = { id: list.length, name: entries[i], address: full + '/', models: [] };
+                        try {
+                            var childF = fs.readdirSync(full);
+                            for (var j = 0; j < childF.length; j++) {
+                                var ext = window.path.extname(childF[j]).toLowerCase();
+                                if (ext === '.pmx' || ext === '.pmd' || ext === '.x') {
+                                    var modelPath = full + path.sep + childF[j];
+                                    d.models.push(modelPath);
+                                    // Check if preview exists
+                                    var pv = full + path.sep + childF[j].replace(/\.[^.]+$/, '') + '.png';
+                                    if (!fs.existsSync(pv)) pendingPreviews.push(modelPath);
+                                }
+                            }
+                        } catch(e) {}
+                        if (d.models.length > 0) list.push(d);
+                    } else if (stat.isFile) {
+                        var ext = window.path.extname(entries[i]).toLowerCase();
+                        if (ext === '.pmx' || ext === '.pmd' || ext === '.x') {
+                            var name = entries[i].replace(/\.[^.]+$/, '');
+                            list.push({ id: list.length, name: name, address: dirPath, models: [full] });
+                            var pv = dirPath + name + '.png';
+                            if (!fs.existsSync(pv)) pendingPreviews.push(full);
+                        }
+                    }
+                }
+            }
+            // Iterate all configured data paths
+            var dataPaths = this.settings.dataPaths || [];
+            if (dataPaths.length === 0) dataPaths = [{ path: '', category: '人物模型', tags: [] }];
+            var processedDirs = {};
+            dataPaths.forEach(function(dpEntry) {
+                var dp = dpEntry.path;
+                if (processedDirs[dp]) return;
+                processedDirs[dp] = true;
+                scanModelDir(dp + path.sep, m);
+                // VMDs
+                if (fs.existsSync(dp)) {
+                    var vmds = fs.readdirSync(dp);
+                    for (var i1 = 0; i1 < vmds.length; i1++) {
+                        var entryPath = dp + path.sep + vmds[i1];
+                        var entryStat;
+                        try { entryStat = fs.lstatSync(entryPath); } catch(e) { continue; }
+                        if (entryStat.isFile && window.path.extname(vmds[i1]).toLowerCase() === '.vmd') {
+                            v.push({ id: v.length, name: vmds[i1], address: entryPath + '/', vmds: [entryPath] });
+                        } else if (entryStat.isDirectory) {
+                            var vd = { id: v.length, name: vmds[i1], address: entryPath + '/', vmds: [] };
+                            try {
+                                var sf = fs.readdirSync(entryPath);
+                                for (var j1 = 0; j1 < sf.length; j1++) {
+                                    if (window.path.extname(sf[j1]).toLowerCase() === '.vmd') {
+                                        vd.vmds.push(entryPath + '/' + sf[j1]);
+                                    }
+                                }
+                            } catch(e) {}
+                            v.push(vd);
+                        }
+                    }
+                    // MMEs
+                    var mmes = fs.readdirSync(dp);
+                    for (var ii1 = 0; ii1 < mmes.length; ii1++) {
+                        var mmePath = dp + path.sep + mmes[ii1];
+                        var mmeStat;
+                        try { mmeStat = fs.lstatSync(mmePath); } catch(e) { continue; }
+                        if (mmeStat.isDirectory) {
+                            mm.push({ id: mm.length, name: mmes[ii1], address: mmePath + '/' });
+                        }
+                    }
+                }
+            });
+            // Deduplicate previews
+            var uniquePreviews = [];
+            var seen = {};
+            for (var pi = 0; pi < pendingPreviews.length; pi++) {
+                if (!seen[pendingPreviews[pi]]) { seen[pendingPreviews[pi]] = true; uniquePreviews.push(pendingPreviews[pi]); }
+            }
+            pendingPreviews = uniquePreviews;
+
+            this.$store.commit('data', { models: m, scenes: s, vmds: v, mmes: mm });
+
+            // Queue preview generation
+            var self2 = this;
+            this._pendingPreviewPromise = new Promise(function(resolveAll) {
+                function startPreviews() {
+                    if (pendingPreviews.length === 0) { resolveAll(); return; }
+                    var total = pendingPreviews.length;
+                    window.updateImportProgress({ visible: true, total: total, done: 0, text: '正在生成模型预览...' });
+                    var queue = pendingPreviews.slice();
+                    var doneCount = 0;
+                    function next() {
+                        if (queue.length === 0) { window.updateImportProgress({ visible: false }); resolveAll(); return; }
+                        var mp = queue.shift();
+                        window.updateImportProgress({ text: '正在生成预览 (' + (doneCount + 1) + '/' + total + ')', detail: window.path.basename(mp) });
+                        window.captureSinglePreview(mp).then(function() {
+                            doneCount++;
+                            window.updateImportProgress({ done: doneCount });
+                            next();
+                        });
+                    }
+                    setTimeout(next, 800);
+                }
+                startPreviews();
+            });
+        },
         resetSettings: function() {
             var defaults = {
-                dataPath: PathManager.PROGRAMPATH,
+                dataPath: '',
+                dataPaths: [{ path: '', category: '人物模型', tags: [] }],
                 defaultModelPath: '',
                 mmdPath: '',
                 preview: {
@@ -702,7 +1195,34 @@ var componentIndex = {
                     showAxis: true,
                     autoRotate: true,
                     cameraFov: 45,
-                    dualModel: false
+                    cameraDistance: 30,
+                    coexistCategories: [],
+                    defaultModelMode: 'custom',
+                    showSkybox: true,
+                    skyboxMode: 'color',
+                    skyboxImagePath: '',
+                    skyColorTop: '#FFFFFF',
+                    skyColorBottom: '#F0F0F0',
+                    skyColorSide: '#FFFFFF',
+                    thumbnailWidth: 48,
+                    thumbnailHeight: 48,
+                    gridThumbWidth: 128,
+                    gridThumbHeight: 128,
+                    viewMode: 'table'
+                },
+                render: {
+                    ambientColor: '#666666',
+                    directionalColor: '#887766',
+                    showAxis: false,
+                    autoRotate: false,
+                    cameraFov: 45,
+                    cameraDistance: 30,
+                    showSkybox: true,
+                    skyboxMode: 'color',
+                    skyboxImagePath: '',
+                    skyColorTop: '#FFFFFF',
+                    skyColorBottom: '#F0F0F0',
+                    skyColorSide: '#FFFFFF'
                 }
             };
             this.settings = defaults;
@@ -712,12 +1232,23 @@ var componentIndex = {
         applyPreview: function() {
             applyPreviewSettings();
         },
-        toggleDualModel: function(val) {
-            this.$set(this.settings.preview, 'dualModel', val);
+        selectSkyboxImage: function(target) {
+            var self = this;
+            target = target || 'preview';
+            var cfg = self.settings[target] || self.settings.preview;
+            var currentPath = cfg.skyboxImagePath || '';
+            window.dialog.openDirectory(currentPath).then(function(result) {
+                if (result) {
+                    var update = {};
+                    update[target] = Object.assign({}, self.settings[target] || {}, { skyboxImagePath: result });
+                    self.settings = Object.assign({}, self.settings, update);
+                    if (target === 'preview') applyPreviewSettings();
+                }
+            });
         },
         selectMmdPath: function() {
             var self = this;
-            var currentPath = self.settings.mmdPath || PathManager.SOFTPATH;
+            var currentPath = self.settings.mmdPath || '';
             window.dialog.openFile(currentPath, [{ name: '可执行文件', extensions: ['exe'] }]).then(function(result) {
                 if (result) {
                     self.settings = Object.assign({}, self.settings, { mmdPath: result });
@@ -767,7 +1298,7 @@ var componentIndex = {
             var dir = window.path.dirname(modelPath);
             var base = window.path.basename(modelPath);
             var name = base.replace(/\.[^.]+$/, ''); // strip extension
-            return dir + '/' + name + '.png';
+            return dir + path.sep + name + '.png';
         },
         _capturePreviewAfterLoad: function(modelPath) {
             var previewPath = this._getPreviewPath(modelPath);
@@ -803,11 +1334,549 @@ var componentIndex = {
         toggleDevTools: function() {
             window.toggleDevTools && window.toggleDevTools();
         },
+        // Category management
+        addCategory: function() {
+            this.categoryDialogTitle = '添加种类';
+            this.categoryForm = { name: '', extensions: '', parent: '' };
+            this.categoryEditIndex = -1;
+            this.categoryDialogVisible = true;
+        },
+        editCategoryNode: function(data) {
+            this.categoryDialogTitle = '编辑种类';
+            this.categoryForm = { name: data.name, extensions: data.extensions, parent: data.parent || '' };
+            this.categoryEditIndex = this.categories.findIndex(function(c) { return c.name === data.name; });
+            this.categoryDialogVisible = true;
+        },
+        deleteCategoryNode: function(data) {
+            var self = this;
+            this.$confirm('确定删除种类 "' + data.name + '"？子种类也会被删除。', '提示', { type: 'warning' }).then(function() {
+                var cats = self.settings.categories.slice().filter(function(c) {
+                    return c.name !== data.name && c.parent !== data.name;
+                });
+                self.settings = Object.assign({}, self.settings, { categories: cats });
+            }).catch(function() {});
+        },
+        saveCategory: function() {
+            var cats = this.settings.categories.slice();
+            var f = this.categoryForm;
+            if (!f.name || !f.extensions) { this.message('名称和后缀不能为空', 'warning'); return; }
+            var entry = { name: f.name, extensions: f.extensions, parent: f.parent || '' };
+            if (this.categoryEditIndex >= 0) {
+                cats.splice(this.categoryEditIndex, 1, entry);
+            } else {
+                cats.push(entry);
+            }
+            this.settings = Object.assign({}, this.settings, { categories: cats });
+            this.categoryDialogVisible = false;
+        },
+        onCategoryChange: function() {
+            this.searchText = '';
+            this.activeFilters = [];
+            this.currentPageModels = 1;
+        },
+        getCategoryData: function(cat) {
+            var raw = [];
+            if (!cat || !cat.name) {
+                // No category selected — merge all data
+                var data = this.$store.state.data;
+                for (var k in data) {
+                    if (k === 'project') continue;
+                    if (Array.isArray(data[k])) raw = raw.concat(data[k]);
+                }
+            } else {
+                var key = this.categoryDataMap[cat.name] || cat.name;
+                raw = this.$store.state.data[key] || [];
+            }
+            // Apply active filters
+            return this.applyFilters(raw);
+        },
+        getCategoryType: function(cat) {
+            if (!cat) return 'model'; // Show all: default to model columns
+            if (cat.type) return cat.type;
+            // Fallback: determine from extensions
+            var exts = (cat.extensions || '').toLowerCase();
+            if (exts.indexOf('.pmx') >= 0 || exts.indexOf('.pmd') >= 0) return 'model';
+            if (exts.indexOf('.vmd') >= 0) return 'motion';
+            return 'effect';
+        },
+        getCategoryCount: function(cat) {
+            // Count unfiltered data
+            var allData = this.$store.state.data;
+            var count = 0;
+            if (cat && cat.name) {
+                var key = this.categoryDataMap[cat.name] || cat.name;
+                var arr = allData[key] || [];
+                arr.forEach(function(d) { count += (d.models || d.vmds || []).length; });
+            } else {
+                for (var k in allData) {
+                    if (k === 'project') continue;
+                    var arr2 = allData[k] || [];
+                    arr2.forEach(function(d) { count += (d.models || d.vmds || []).length; });
+                }
+            }
+            return count;
+        },
+        addItemToDataJson: function(item) {
+            window._addItemToDataJson(item);
+        },
+        _reloadDataJson: function() {
+            window._reloadDataJson();
+        },
+        forceRescan: function() {
+            var self = this;
+            var known = {};
+            var dataJsonPath = PathManager.getDataFullPath();
+            try {
+                var raw = JSON.parse(fs.readFileSync(dataJsonPath).toString('utf8'));
+                (raw.items || []).forEach(function(i) { known[i.path] = i.category; });
+            } catch(e) {}
+            var allowedExts2 = {};
+            (self.monitoredExtensions || '.pmx,.pmd').split(',').forEach(function(e) { e = e.trim().toLowerCase(); if (e) allowedExts2[e] = true; });
+            var newFiles = [];
+            function scanDir(dir) {
+                if (!fs.existsSync(dir)) return;
+                var entries = fs.readdirSync(dir);
+                entries.forEach(function(f) {
+                    var fp = dir + '/' + f;
+                    var st;
+                    try { st = fs.lstatSync(fp); } catch(e) { return; }
+                    if (st.isDirectory) { scanDir(fp); }
+                    else {
+                        var ext = window.path.extname(f).toLowerCase();
+                        if (allowedExts2[ext] && !known[fp]) {
+                            // Find default category/tags from matching path
+                            var dCat = '人物模型', dTags = [];
+                            (self.settings.dataPaths || []).forEach(function(dp2) {
+                                if (fp.indexOf(dp2.path) === 0) { dCat = dp2.category || '人物模型'; dTags = dp2.tags || []; }
+                            });
+                            newFiles.push({ src: fp, name: f, defaultCategory: dCat, defaultTags: dTags });
+                        }
+                    }
+                });
+            }
+            // Scan all configured paths
+            var dataPaths = self.settings.dataPaths || [];
+            if (dataPaths.length === 0) dataPaths = [{ path: '', category: '人物模型', tags: [] }];
+            var scannedRoots = {};
+            dataPaths.forEach(function(dpEntry) {
+                var root = dpEntry.path;
+                if (scannedRoots[root]) return;
+                scannedRoots[root] = true;
+                scanDir(root);
+            });
+            if (newFiles.length > 0 && window.showBatchClassifyDialog) {
+                window.showBatchClassifyDialog(newFiles, function(choices, tagChoices) {
+                    newFiles.forEach(function(f) {
+                        var tags = (tagChoices && tagChoices[f.src]) || f.defaultTags || [];
+                        window._addItemToDataJson({ path: f.src, category: choices[f.src] || f.defaultCategory || '人物模型', group: window.path.basename(window.path.dirname(f.src)), tags: tags });
+                    });
+                    self._invalidateItemCategoryCache();
+                    self._bookmarkVersion = (self._bookmarkVersion || 0) + 1;
+                    window._reloadDataJson();
+                    self.$forceUpdate();
+                    self.message("已添加 " + newFiles.length + " 个新文件");
+                });
+            } else {
+                self._invalidateItemCategoryCache();
+                self._bookmarkVersion = (self._bookmarkVersion || 0) + 1;
+                window._reloadDataJson();
+                self.$forceUpdate();
+                self.message(newFiles.length === 0 ? "没有新文件" : "数据已刷新");
+            }
+        },
+        forceRescanAll: function() {
+            var self = this;
+            var dp = PathManager.getDataFullPath();
+            var data = {};
+            try { data = JSON.parse(fs.readFileSync(dp).toString('utf8')); } catch(e) {}
+            if (!data.items) data.items = [];
+            var known = {};
+            data.items.forEach(function(i) { known[i.path] = true; });
+            var allFiles = [];
+            function scanDir(dir, allowed) {
+                if (!fs.existsSync(dir)) return;
+                var entries = fs.readdirSync(dir);
+                entries.forEach(function(f) {
+                    var fp = dir + '/' + f;
+                    var st;
+                    try { st = fs.lstatSync(fp); } catch(e) { return; }
+                    if (st.isDirectory) { scanDir(fp, allowed); }
+                    else {
+                        var ext = window.path.extname(f).toLowerCase();
+                        if (allowed[ext]) {
+                            allFiles.push({ src: fp, name: f });
+                        }
+                    }
+                });
+            }
+            var dataPaths = self.settings.dataPaths || [];
+            if (dataPaths.length === 0) dataPaths = [{ path: '', category: '人物模型', tags: [] }];
+            var scannedRoots = {};
+            dataPaths.forEach(function(dpEntry) {
+                if (scannedRoots[dpEntry.path]) return;
+                scannedRoots[dpEntry.path] = true;
+                // Build allowed extensions from this path's default category
+                var catCfg = (self.settings.categories || []).find(function(c) { return c.name === (dpEntry.category || '人物模型'); });
+                var exts = catCfg ? (catCfg.extensions || '.pmx,.pmd') : '.pmx,.pmd';
+                var allowed = {};
+                exts.split(',').forEach(function(e) { e = e.trim().toLowerCase(); if (e) allowed[e] = true; });
+                scanDir(dpEntry.path, allowed);
+            });
+            data.items = data.items.filter(function(i) { return fs.existsSync(i.path); });
+            // Build classify items with pre-assigned defaults
+            var classifyItems = [];
+            var defaultChoices = {};
+            allFiles.forEach(function(f) {
+                var defCat = '人物模型';
+                var defTags = [];
+                (self.settings.dataPaths || []).forEach(function(dp2) {
+                    if (f.src.indexOf(dp2.path) === 0) {
+                        defCat = dp2.category || '人物模型';
+                        defTags = dp2.tags || [];
+                    }
+                });
+                classifyItems.push({ src: f.src, name: f.name, defaultCategory: defCat, defaultTags: defTags });
+                defaultChoices[f.src] = defCat;
+            });
+            if (classifyItems.length > 0 && window.showBatchClassifyDialog) {
+                window.showBatchClassifyDialog(classifyItems, function(choices, tagChoices) {
+                    allFiles.forEach(function(f) {
+                        var cat = choices[f.src] || defaultChoices[f.src] || '人物模型';
+                        var tags = (tagChoices && tagChoices[f.src]) || [];
+                        var existingItem = data.items.find(function(i) { return i.path === f.src; });
+                        if (existingItem) {
+                            existingItem.category = cat;
+                            existingItem.tags = tags.slice();
+                            existingItem.group = window.path.basename(window.path.dirname(f.src));
+                        } else {
+                            data.items.push({ path: f.src, category: cat, group: window.path.basename(window.path.dirname(f.src)), tags: tags.slice() });
+                        }
+                    });
+                    data.settings = self.settings;
+                    fs.writeFileSync(dp, JSON.stringify(data, null, 2));
+                    self._cleanUnmonitoredItems();
+                    window._reloadDataJson();
+                    self._invalidateItemCategoryCache();
+                    self._bookmarkVersion = (self._bookmarkVersion || 0) + 1;
+                    self.$forceUpdate();
+                    self.message('已重新扫描 ' + allFiles.length + ' 个文件');
+                });
+            } else {
+                data.settings = self.settings;
+                fs.writeFileSync(dp, JSON.stringify(data, null, 2));
+                self._cleanUnmonitoredItems();
+                window._reloadDataJson();
+                self.message('已重新扫描 ' + allFiles.length + ' 个文件');
+            }
+        },
+        forceRegeneratePreviews: function() {
+            var self = this;
+            // Collect all model files from current data
+            var allModels = [];
+            var data = this.$store.state.data;
+            ['models', 'scenes'].forEach(function (key) {
+                (data[key] || []).forEach(function (group) {
+                    (group.models || []).forEach(function (mp) {
+                        var ext = window.path.extname(mp).toLowerCase();
+                        if (ext === '.pmx' || ext === '.pmd' || ext === '.x') {
+                            allModels.push(mp);
+                        }
+                    });
+                });
+            });
+            if (allModels.length === 0) {
+                self.message('没有可生成预览的模型文件');
+                return;
+            }
+            // Force regenerate all previews, ignoring whether they already exist
+            var total = allModels.length;
+            window.updateImportProgress({ visible: true, total: total, done: 0, text: '正在强制生成所有预览...' });
+            var queue = allModels.slice();
+            var doneCount = 0;
+            function next() {
+                if (queue.length === 0) {
+                    window.updateImportProgress({ visible: false });
+                    // Clear preview caches
+                    self._invalidatePreviewCache();
+                    self.message('全部预览已重新生成 (' + total + ' 个)');
+                    return;
+                }
+                var mp = queue.shift();
+                window.updateImportProgress({
+                    text: '正在生成预览 (' + (doneCount + 1) + '/' + total + ')',
+                    detail: window.path.basename(mp),
+                    done: doneCount
+                });
+                window.captureSinglePreview(mp).then(function () {
+                    doneCount++;
+                    window.updateImportProgress({ done: doneCount });
+                    next();
+                });
+            }
+            setTimeout(next, 500);
+        },
+        _getItemCategory: function(mp) {
+            if (!this._itemCategoryCache) {
+                this._itemCategoryCache = {};
+                try {
+                    var dp = PathManager.getDataFullPath();
+                    var raw = JSON.parse(fs.readFileSync(dp).toString('utf8'));
+                    (raw.items || []).forEach(function (i) {
+                        this._itemCategoryCache[i.path] = i.category || '';
+                        this._itemCategoryCache['__bm__' + i.path] = !!i.bookmarked;
+                        this._itemCategoryCache['__nsfw__' + i.path] = !!i.nsfw;
+                    }.bind(this));
+                } catch(e) {}
+            }
+            return this._itemCategoryCache[mp] || '';
+        },
+        _deriveCategoryFromStore: function(mp) {
+            var data = this.$store.state.data;
+            var cats = this.categories;
+            for (var k in data) {
+                if (!Array.isArray(data[k])) continue;
+                for (var gi = 0; gi < data[k].length; gi++) {
+                    var g = data[k][gi];
+                    if ((g.models || []).indexOf(mp) < 0) continue;
+                    // Prefer: group name matches a category name
+                    for (var ci = 0; ci < cats.length; ci++) {
+                        if (cats[ci].name === g.name) return cats[ci].name;
+                    }
+                    // Fallback: store key mapping
+                    for (var cj = 0; cj < cats.length; cj++) {
+                        var ck = this.categoryDataMap[cats[cj].name] || cats[cj].name;
+                        if (ck === k) return cats[cj].name;
+                    }
+                    return '';
+                }
+            }
+            return '';
+        },
+        getGroupCategories: function(group) {
+            var cats = [];
+            var models = group.models || [];
+            for (var i = 0; i < models.length; i++) {
+                var cat = this._getItemCategory(models[i]);
+                if (!cat) cat = this._deriveCategoryFromStore(models[i]);
+                if (cat && cats.indexOf(cat) < 0) cats.push(cat);
+            }
+            return cats;
+        },
+        _getCategoryPath: function(name) {
+            // Build full path like "人物模型 > 子分类"
+            var parts = [name];
+            var cats = this.categories || [];
+            var current = name;
+            while (current) {
+                var parent = null;
+                for (var i = 0; i < cats.length; i++) {
+                    if (cats[i].name === current) { parent = cats[i].parent; break; }
+                }
+                if (parent) { parts.unshift(parent); current = parent; }
+                else { current = null; }
+            }
+            return parts.join(' > ');
+        },
+        _isCategoryDescendant: function(catName, ancestorName) {
+            if (!catName || !ancestorName) return false;
+            var cats = this.categories || [];
+            var current = catName;
+            while (current) {
+                if (current === ancestorName) return true;
+                var found = false;
+                for (var i = 0; i < cats.length; i++) {
+                    if (cats[i].name === current && cats[i].parent) {
+                        current = cats[i].parent;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) break;
+            }
+            return false;
+        },
+        _getCategoryDescendants: function(name) {
+            var result = [name];
+            var cats = this.categories || [];
+            function collectChildren(parent) {
+                cats.forEach(function(c) {
+                    if (c.parent === parent) {
+                        result.push(c.name);
+                        collectChildren(c.name);
+                    }
+                });
+            }
+            collectChildren(name);
+            return result;
+        },
+        _cleanUnmonitoredItems: function() {
+            var allowed = {};
+            var scanExts = (this.monitoredExtensions || '.pmx,.pmd').split(',');
+            scanExts.forEach(function(e) { e = e.trim().toLowerCase(); if (e) allowed[e] = true; });
+            var dp = PathManager.getDataFullPath();
+            try {
+                var raw = JSON.parse(fs.readFileSync(dp).toString('utf8'));
+                var before = (raw.items || []).length;
+                raw.items = (raw.items || []).filter(function(i) {
+                    var ext = window.path.extname(i.path).toLowerCase();
+                    return allowed[ext] && fs.existsSync(i.path);
+                });
+                if (raw.items.length < before) {
+                    fs.writeFileSync(dp, JSON.stringify(raw, null, 2));
+                }
+            } catch(e) {}
+        },
+        _invalidateItemCategoryCache: function() {
+            this._itemCategoryCache = null;
+        },
+        _invalidatePreviewCache: function() {
+            // Clear hasPreview cache entries
+            for (var key in this) {
+                if (key.indexOf('__prev_') === 0) {
+                    delete this[key];
+                }
+            }
+        },
         message: function (info, type) {
             showNotify(info, type || 'info');
         },
     },
+    mounted: function() {
+        window._previewModel = this.updateModel.bind(this);
+    },
 };
+// Global helper for main.js to call
+window._addItemToDataJson = function(item) {
+    var dp = PathManager.getDataFullPath();
+    try {
+        var raw = JSON.parse(fs.readFileSync(dp).toString('utf8'));
+        if (!raw.items) raw.items = [];
+        if (!raw.items.some(function(i) { return i.path === item.path && i.category === item.category; })) {
+            raw.items.push(item);
+            fs.writeFileSync(dp, JSON.stringify(raw, null, 2));
+        }
+    } catch(e) { console.error(e); }
+};
+
+var componentSetting = {
+    template: '#tSetting',
+    created: function() {
+        router.replace('/index');
+    },
+};
+var componentProject = {
+    template: `#tProject`,
+    data() {
+        return {
+            search: '',
+        };
+    },
+    computed: {
+        mData: {
+            get() { return this.$store.state.data; },
+        },
+        project: {
+            get() {
+                if (this.search == "") return this.mData.project || [];
+                return (this.mData.project || []).filter(function(item) {
+                    return item.name.toLowerCase().indexOf(this.search.toLowerCase()) !== -1;
+                }.bind(this));
+            },
+        },
+    },
+    methods: {
+        open: function(address) { window.shell.openPath(address); },
+        copy: function(text) { window.clipboard.writeText(text); },
+        getProjectNum: function() { return (this.project || []).length; },
+    },
+};
+
+// Global helpers for data.json
+window._addItemToDataJson = function(item) {
+    var dp = PathManager.getDataFullPath();
+    try {
+        var raw = JSON.parse(fs.readFileSync(dp).toString('utf8'));
+        if (!raw.items) raw.items = [];
+        if (!raw.items.some(function(i) { return i.path === item.path && i.category === item.category; })) {
+            raw.items.push(item);
+            fs.writeFileSync(dp, JSON.stringify(raw, null, 2));
+        }
+        window._reloadDataJson();
+    } catch(e) { console.error(e); }
+};
+window._reloadDataJson = function() {
+    var dp = PathManager.getDataFullPath();
+    try {
+        var raw = JSON.parse(fs.readFileSync(dp).toString('utf8'));
+        window.store.state.important = raw.important || [];
+        var items = raw.items || [];
+        var data = { models: [], scenes: [], vmds: [], mmes: [], project: [] };
+        var catMap = { '人物模型': 'models', '场景模型': 'scenes', '动作文件': 'vmds', 'MME特效': 'mmes' };
+        (raw.settings && raw.settings.categories || []).forEach(function(c) {
+            if (!catMap[c.name]) catMap[c.name] = c.type === 'motion' ? 'vmds' : c.type === 'effect' ? 'mmes' : 'models';
+        });
+        var groups = {};
+        items.forEach(function(item) {
+            var k = catMap[item.category] || 'models';
+            var gn = item.group || window.path.basename(item.path).replace(/\.[^.]+$/, '');
+            var gk = k + '|' + gn;
+            if (!groups[gk]) { groups[gk] = { id: Object.keys(groups).length, name: gn, address: window.path.dirname(item.path) + '/', models: [], vmds: [], img: 'yes', type: 'no', info: { tags: [] } }; data[k].push(groups[gk]); }
+            if (window.path.extname(item.path).toLowerCase() === '.vmd') groups[gk].vmds.push(item.path);
+            else groups[gk].models.push(item.path);
+            // Aggregate per-item tags to group level
+            if (item.tags && item.tags.length > 0) {
+                var gInfo = groups[gk].info;
+                if (!gInfo.tags) gInfo.tags = [];
+                item.tags.forEach(function(t) {
+                    if (gInfo.tags.indexOf(t) < 0) gInfo.tags.push(t);
+                });
+                groups[gk].type = 'yes';
+            }
+        });
+        window.store.state.data = data;
+    } catch(e) { console.error(e); }
+};
+
+// Capture preview for a single model (load → render → screenshot → cleanup)
+window.captureSinglePreview = function(modelPath) {
+    return new Promise(function(resolve) {
+        var prevModel = window.model;
+        if (prevModel) window.scene.remove(prevModel);
+        window.model = null;
+        window.loader.MMDLoader.loadModel(
+            modelPath,
+            function(mmd) {
+                window.model = mmd;
+                mmd.userData.modelPath = modelPath;
+                window.scene.add(mmd);
+                setupModel(mmd, false);
+                var previewPath = window.path.dirname(modelPath) + window.path.sep +
+                    window.path.basename(modelPath).replace(/\.[^.]+$/, '') + '.png';
+                setTimeout(function() {
+                    window.resetCamera && window.resetCamera();
+                    // Apply render settings for preview generation
+                    var renderSettings = window.store && window.store.state.settings && window.store.state.settings.render;
+                    if (renderSettings) {
+                        window.applyPreviewSettings && window.applyPreviewSettings(renderSettings);
+                    }
+                    var dataUrl = window.capturePreview && window.capturePreview();
+                    if (dataUrl && window.savePreviewImage) {
+                        window.savePreviewImage(previewPath, dataUrl);
+                    }
+                    // Restore user preview settings
+                    window.applyPreviewSettings && window.applyPreviewSettings();
+                    window.scene.remove(mmd);
+                    window.model = null;
+                    if (prevModel) { window.scene.add(prevModel); window.model = prevModel; }
+                    resolve();
+                }, 2000);
+            },
+            window.onProgress,
+            function() { resolve(); }
+        );
+    });
+};
+
 // Auto-load all models in a folder for preview capture (background).
 // onProgress(name, step, idx, total) called for each model.
 // Returns a Promise that resolves when all captures are done.
@@ -853,14 +1922,19 @@ window.autoPreviewImport = function(folderPath, onProgress) {
                         window.scene.add(mmd);
                         setupModel(mmd, false);
                         onProgress(modelName, '渲染截图...', curIdx, total);
-                        var previewPath = window.path.dirname(modelPath) + '/' +
+                        var previewPath = window.path.dirname(modelPath) + window.path.sep +
                             window.path.basename(modelPath).replace(/\.[^.]+$/, '') + '.png';
                         setTimeout(function() {
                             window.resetCamera && window.resetCamera();
+                            var renderSettings = window.store && window.store.state.settings && window.store.state.settings.render;
+                            if (renderSettings) {
+                                window.applyPreviewSettings && window.applyPreviewSettings(renderSettings);
+                            }
                             var dataUrl = window.capturePreview && window.capturePreview();
                             if (dataUrl && window.savePreviewImage) {
                                 window.savePreviewImage(previewPath, dataUrl);
                             }
+                            window.applyPreviewSettings && window.applyPreviewSettings();
                             onProgress(modelName, '完成', curIdx, total);
                             window.scene.remove(mmd);
                             window.model = null;
@@ -940,5 +2014,4 @@ var componentProject = {
 window.routes = [
     { path: "/", component: componentInit },
     { path: "/index", component: componentIndex },
-    { path: "/project", component: componentProject },
 ];

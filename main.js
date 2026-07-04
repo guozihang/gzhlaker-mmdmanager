@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, clipboard, shell, dialog } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, clipboard, shell, dialog, nativeImage } = require('electron');
 
 // Must be set before app.whenReady() for macOS menu bar name
 app.name = 'MMDManager';
@@ -21,112 +21,15 @@ function getProgramPath() {
     return __dirname;
 }
 const PROGRAMPATH = getProgramPath();
-const DATAPATH = path.join(PROGRAMPATH, 'data') + path.sep;
-const SOFTPATH = path.join(PROGRAMPATH, 'software') + path.sep;
-const PROJECTPATH = path.join(PROGRAMPATH, 'project') + path.sep;
-const MODELPATH = path.join(DATAPATH, 'Model') + path.sep;
-const MMEPATH = path.join(DATAPATH, 'MME') + path.sep;
-const SCENEPATH = path.join(DATAPATH, 'Scene') + path.sep;
-const VMDPATH = path.join(DATAPATH, 'Vmd') + path.sep;
-const GAMEPATH = path.join(DATAPATH, 'Game') + path.sep;
 
 let mainWindow = null;
-let mmdProcess = null;  // Track MMD process so only one instance runs at a time
-
-function spawnApp(exePath) {
-    try {
-        const proc = spawn(exePath, [], {
-            detached: true,
-            stdio: 'ignore',
-            cwd: path.dirname(exePath)
-        });
-        proc.unref();
-    } catch (err) {
-        console.error('Failed to launch:', exePath, err);
-    }
-}
+let mmdProcess = null;
 
 // Wrapper for shell.openPath that strips trailing separators.
 // Required on Windows where ShellExecuteW rejects paths ending with backslash.
 function openFolder(folderPath) {
     const cleaned = folderPath.replace(/[\\/]+$/, '');
     return shell.openPath(cleaned);
-}
-
-function scanSoftware() {
-    const items = [];
-    if (!fs.existsSync(SOFTPATH)) return items;
-    const dirs = fs.readdirSync(SOFTPATH);
-    for (const dir of dirs) {
-        const dirPath = path.join(SOFTPATH, dir);
-        let stat;
-        try { stat = fs.statSync(dirPath); } catch (_) { continue; }
-        if (!stat.isDirectory()) continue;
-        const files = fs.readdirSync(dirPath);
-        for (const file of files) {
-            if (path.extname(file).toLowerCase() === '.exe') {
-                const exePath = path.join(dirPath, file);
-                items.push({
-                    label: dir,  // Use folder name as the menu label
-                    click: () => spawnApp(exePath)
-                });
-                break; // Only take the first .exe per folder
-            }
-        }
-    }
-    return items;
-}
-
-function buildMenu() {
-    const softwareItems = scanSoftware();
-
-    const template = [
-        {
-            label: 'MMDManager',
-            submenu: [
-                {
-                    label: 'Models',
-                    accelerator: 'CmdOrCtrl+Shift+1',
-                    click: () => {
-                        if (mainWindow) mainWindow.webContents.send('menu:navigate', '/index');
-                    }
-                },
-                {
-                    label: 'Project',
-                    accelerator: 'CmdOrCtrl+Shift+2',
-                    click: () => {
-                        if (mainWindow) mainWindow.webContents.send('menu:navigate', '/project');
-                    }
-                },
-                { type: 'separator' },
-                {
-                    label: 'Models 文件夹',
-                    click: () => openFolder(MODELPATH)
-                },
-                {
-                    label: 'Scene 文件夹',
-                    click: () => openFolder(SCENEPATH)
-                },
-                {
-                    label: 'VMD 文件夹',
-                    click: () => openFolder(VMDPATH)
-                },
-                {
-                    label: 'MME 文件夹',
-                    click: () => openFolder(MMEPATH)
-                },
-                {
-                    label: 'BridgeOut 文件夹',
-                    click: () => openFolder(path.join(SOFTPATH, 'MikuMikuDance_V926_Bridge', 'out'))
-                },
-                { type: 'separator' },
-                ...softwareItems
-            ]
-        }
-    ];
-
-    const menu = Menu.buildFromTemplate(template);
-    Menu.setApplicationMenu(menu);
 }
 
 function createWindow() {
@@ -149,12 +52,11 @@ function createWindow() {
         }
     });
 
-    buildMenu();
+    Menu.setApplicationMenu(null);
 
     mainWindow.loadFile('index.html');
 
-    // DevTools closed by default — toggle via settings button or shortcut
-    // mainWindow.webContents.openDevTools();
+    mainWindow.webContents.openDevTools();
 
     mainWindow.once('ready-to-show', () => {
         mainWindow.show();
@@ -192,6 +94,36 @@ ipcMain.handle('child-process:exec', (event, { command, options }) => {
     });
 });
 
+ipcMain.on('drag:start', (event, filePath) => {
+    if (!filePath || !fs.existsSync(filePath)) return;
+    // Use the model's preview thumbnail as drag icon if available, resized to ~200px
+    var dir = path.dirname(filePath);
+    var base = path.basename(filePath);
+    var name = base.replace(/\.[^.]+$/, '');
+    var previewPath = path.join(dir, name + '.png');
+    var icon;
+    if (fs.existsSync(previewPath)) {
+        var img = nativeImage.createFromPath(previewPath);
+        var size = img.getSize();
+        var maxDim = 200;
+        var w, h;
+        if (size.width > size.height) {
+            w = maxDim;
+            h = Math.round(size.height * maxDim / size.width);
+        } else {
+            h = maxDim;
+            w = Math.round(size.width * maxDim / size.height);
+        }
+        icon = img.resize({ width: w, height: h });
+    } else {
+        icon = path.join(PROGRAMPATH, 'icon.png');
+    }
+    event.sender.startDrag({
+        file: path.normalize(filePath),
+        icon: icon,
+    });
+});
+
 ipcMain.handle('clipboard:write', (event, text) => {
     clipboard.writeText(text);
 });
@@ -200,9 +132,6 @@ ipcMain.handle('shell:openPath', (event, folderPath) => {
     return openFolder(folderPath);
 });
 
-ipcMain.handle('menu:rebuild', () => {
-    buildMenu();
-});
 
 ipcMain.handle('devtools:toggle', () => {
     if (mainWindow) {
@@ -305,17 +234,7 @@ ipcMain.handle('fs:copyFolder', async (event, { src, dest }) => {
 
 // Pass all path constants to renderer
 ipcMain.handle('get-app-paths', () => {
-    return {
-        PROGRAMPATH,
-        DATAPATH,
-        SOFTPATH,
-        PROJECTPATH,
-        MODELPATH,
-        MMEPATH,
-        SCENEPATH,
-        VMDPATH,
-        GAMEPATH
-    };
+    return { PROGRAMPATH };
 });
 
 // Fix GPU mailbox errors and WebGL texture issues on macOS

@@ -16,15 +16,20 @@ function initCamera() {
     var target = document.getElementById("modelTarget");
     var w = target.clientWidth || 800;
     var h = Math.min(w * 0.75, 600);
-    var fov = getPreview().cameraFov || 45;
+    var p = getPreview();
+    var fov = p.cameraFov || 45;
+    var dist = p.cameraDistance || 30;
     camera = new THREE.PerspectiveCamera(fov, w / h, 1, 2000);
     camera.position.y = 10;
-    camera.position.z = 30;
+    camera.position.z = dist;
 }
 
 function initScene() {
     scene = new THREE.Scene();
-    scene.background = createSkybox();
+    var p = getPreview();
+    _cachedSkybox = createSkybox(p);
+    _skyboxColorKey = (p.skyColorTop || '') + '|' + (p.skyColorBottom || '') + '|' + (p.skyColorSide || '');
+    scene.background = (p.showSkybox !== false) ? _cachedSkybox : new THREE.Color('#222222');
     scene._axisHelper = new THREE.AxisHelper(5);
     if (getPreview().showAxis !== false) {
         scene.add(scene._axisHelper);
@@ -91,6 +96,7 @@ function initEventListener() {
     window.addEventListener("resize", onWindowResize, false);
     // Bootstrap modal opens with 0×0 then transitions — resize when fully shown
     $('#myModal').on('shown.bs.modal', function () {
+        applyPreviewSettings();
         setTimeout(onWindowResize, 150);
     });
 }
@@ -131,7 +137,8 @@ function clearCache(item) {
 }
 
 function resetCamera() {
-    camera.position.set(0, 10, 30);
+    var dist = getPreview().cameraDistance || 30;
+    camera.position.set(0, 10, dist);
     controls.target.set(0, 10, 0);
     controls.update();
 }
@@ -240,8 +247,12 @@ function getPreview() {
     return (s && s.preview) || {};
 }
 
-function applyPreviewSettings() {
-    var p = getPreview();
+var _cachedSkybox = null;
+
+var _skyboxColorKey = '';
+
+function applyPreviewSettings(override) {
+    var p = override || getPreview();
     if (light[0]) light[0].color.set(p.ambientColor || '#666666');
     if (light[1]) light[1].color.set(p.directionalColor || '#887766');
     if (scene._axisHelper) {
@@ -251,13 +262,94 @@ function applyPreviewSettings() {
     if (controls) controls.autoRotate = p.autoRotate !== false;
     if (camera) {
         camera.fov = p.cameraFov || 45;
+        camera.position.z = p.cameraDistance || 30;
         camera.updateProjectionMatrix();
+    }
+    // Skybox toggle
+    var colorKey = (p.skyColorTop || '') + '|' + (p.skyColorBottom || '') + '|' + (p.skyColorSide || '') + '|' + (p.skyboxMode || '') + '|' + (p.skyboxImagePath || '');
+    if (p.showSkybox !== false) {
+        if (!_cachedSkybox || _skyboxColorKey !== colorKey) {
+            _cachedSkybox = createSkybox(p);
+            _skyboxColorKey = colorKey;
+        }
+        scene.background = _cachedSkybox;
+    } else {
+        scene.background = new THREE.Color('#222222');
     }
 }
 window.applyPreviewSettings = applyPreviewSettings;
 
-function createSkybox() {
+function loadImageSkybox(imagePath) {
+    try {
+        var st = window.fs.statSync(imagePath);
+        if (st.isDirectory()) {
+            // Load 6-face cubemap from folder
+            var faces = [];
+            var names = ['right', 'left', 'top', 'bottom', 'front', 'back'];
+            var exts = ['.jpg', '.jpeg', '.png', '.bmp'];
+            for (var i = 0; i < names.length; i++) {
+                var found = null;
+                for (var j = 0; j < exts.length; j++) {
+                    var fp = imagePath + '/' + names[i] + exts[j];
+                    if (window.fs.existsSync(fp)) { found = fp; break; }
+                }
+                if (!found) {
+                    // Try posx/negx naming
+                    var altNames = ['posx', 'negx', 'posy', 'negy', 'posz', 'negz'];
+                    for (var k = 0; k < exts.length; k++) {
+                        var ap = imagePath + '/' + altNames[i] + exts[k];
+                        if (window.fs.existsSync(ap)) { found = ap; break; }
+                    }
+                }
+                if (found) {
+                    var img = new Image();
+                    img.src = found;
+                    faces.push(img);
+                } else {
+                    return null;
+                }
+            }
+            var cubeTex = new THREE.CubeTexture(faces);
+            cubeTex.needsUpdate = true;
+            return cubeTex;
+        } else {
+            // Single equirectangular image
+            var texLoader = new THREE.TextureLoader();
+            return texLoader.load(imagePath);
+        }
+    } catch(e) {
+        console.error('Failed to load skybox image:', e);
+        return null;
+    }
+}
+
+function createSkybox(p) {
     var size = 256;
+    p = p || {};
+    if (p.skyboxMode === 'image' && p.skyboxImagePath) {
+        var imgSky = loadImageSkybox(p.skyboxImagePath);
+        if (imgSky) return imgSky;
+        // Fallback to color on load failure
+    }
+    // Helper: lighten/darken a color by mixing with white/black
+    function lighter(hex) {
+        var r = parseInt(hex.slice(1,3), 16);
+        var g = parseInt(hex.slice(3,5), 16);
+        var b = parseInt(hex.slice(5,7), 16);
+        r = Math.min(255, r + Math.round((255 - r) * 0.3));
+        g = Math.min(255, g + Math.round((255 - g) * 0.3));
+        b = Math.min(255, b + Math.round((255 - b) * 0.3));
+        return '#' + [r,g,b].map(function(v) { return ('0' + v.toString(16)).slice(-2); }).join('');
+    }
+    function darker(hex) {
+        var r = parseInt(hex.slice(1,3), 16);
+        var g = parseInt(hex.slice(3,5), 16);
+        var b = parseInt(hex.slice(5,7), 16);
+        r = Math.round(r * 0.8);
+        g = Math.round(g * 0.8);
+        b = Math.round(b * 0.8);
+        return '#' + [r,g,b].map(function(v) { return ('0' + v.toString(16)).slice(-2); }).join('');
+    }
 
     function makeCanvas(topColor, bottomColor) {
         var c = document.createElement('canvas');
@@ -273,9 +365,13 @@ function createSkybox() {
         return c;
     }
 
-    var skyTop    = makeCanvas('#87CEEB', '#B0D4E8');
-    var skyBottom = makeCanvas('#E8E8E8', '#D0D0D0');
-    var skySide   = makeCanvas('#B8D8F0', '#E0E0E0');
+    var topColor    = p.skyColorTop    || '#87CEEB';
+    var bottomColor = p.skyColorBottom || '#E8E8E8';
+    var sideColor   = p.skyColorSide   || '#B8D8F0';
+
+    var skyTop    = makeCanvas(topColor, lighter(topColor));
+    var skyBottom = makeCanvas(bottomColor, darker(bottomColor));
+    var skySide   = makeCanvas(sideColor, lighter(sideColor));
 
     var cubeMap = new THREE.CubeTexture([
         skySide, skySide, skyTop, skyBottom, skySide, skySide

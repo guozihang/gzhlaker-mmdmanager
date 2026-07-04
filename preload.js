@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer, clipboard } = require('electron');
+const { contextBridge, ipcRenderer } = require('electron');
 const fs = require('fs');
 const pathMod = require('path');
 const processMod = require('process');
@@ -133,7 +133,7 @@ contextBridge.exposeInMainWorld('dialog', {
 });
 
 contextBridge.exposeInMainWorld('clipboard', {
-    writeText: (text) => clipboard.writeText(text)
+    writeText: (text) => ipcRenderer.invoke('clipboard:write', text)
 });
 
 contextBridge.exposeInMainWorld('shell', {
@@ -148,9 +148,6 @@ contextBridge.exposeInMainWorld('copyFolder', (src, dest) => {
     return ipcRenderer.invoke('fs:copyFolder', { src, dest });
 });
 
-contextBridge.exposeInMainWorld('rebuildMenu', () => {
-    return ipcRenderer.invoke('menu:rebuild');
-});
 
 contextBridge.exposeInMainWorld('savePreviewImage', (filePath, base64Data) => {
     var raw = base64Data.replace(/^data:image\/png;base64,/, '');
@@ -162,10 +159,20 @@ contextBridge.exposeInMainWorld('toggleDevTools', () => {
     return ipcRenderer.invoke('devtools:toggle');
 });
 
-// Listen for menu navigation commands from main process
-ipcRenderer.on('menu:navigate', (event, route) => {
-    window.postMessage({ type: 'menu:navigate', route: route }, '*');
+// Drag-out: start native file drag when dragging app elements
+document.addEventListener('dragstart', function(e) {
+    var filePath = e.target.dataset && e.target.dataset.filepath;
+    if (!filePath) {
+        // Check parent (for popover-wrapped buttons)
+        var parent = e.target.closest('[data-filepath]');
+        if (parent) filePath = parent.dataset.filepath;
+    }
+    if (filePath) {
+        e.preventDefault();
+        ipcRenderer.send('drag:start', filePath);
+    }
 });
+
 
 // Intercept file drops — File.path works on Windows but not macOS.
 // On macOS we read via webkitGetAsEntry and write to a temp directory.
