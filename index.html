@@ -173,8 +173,8 @@
                         </el-table-column>
                     </el-table>
                     <!-- 瀑布流视图 -->
-                    <div v-if="settings.preview.viewMode==='grid'" style="display:flex;flex-wrap:wrap;gap:12px;padding:4px 0;min-height:200px">
-                        <div v-for="(item, idx) in gridItems" :key="item.path" style="display:flex;flex-direction:column;align-items:center;width:160px"
+                    <div v-if="settings.preview.viewMode==='grid'" style="display:flex;flex-wrap:wrap;gap:12px;padding:4px 0;min-height:200px;justify-content:center">
+                        <div v-for="(item, idx) in gridItems" :key="item.path" style="display:flex;flex-direction:column;align-items:center"
                             @contextmenu.prevent="exportToMmd(item.path)">
                             <div style="display:flex;justify-content:space-between;width:100%;margin-bottom:2px;font-size:11px;color:#909399">
                                 <el-popover placement="bottom" trigger="hover">

@@ -120,6 +120,8 @@ function collectAndProcess(paths, callback) {
 }
 
 function collectDropFiles(srcPath) {
+    // Normalize path: strip trailing separators, replace double backslashes
+    srcPath = srcPath.replace(/[\\/]+$/, '');
     var files = [];
     try {
         var ext = window.path.extname(srcPath).toLowerCase();
@@ -163,6 +165,7 @@ function getMonitoredExtensions() {
 
 function scanDropDir(dir, files, rootPath, wrapFolder) {
     if (!rootPath) rootPath = dir;
+    dir = dir.replace(/[/\\]+$/, '') + window.path.sep;
     var rp = rootPath.replace(/[/\\]+$/, '');
     var list;
     try { list = window.fs.readdirSync(dir); } catch(e) { return; }
@@ -171,7 +174,7 @@ function scanDropDir(dir, files, rootPath, wrapFolder) {
         var full = dir + list[i];
         var st;
         try { st = window.fs.statSync(full); } catch(e) { continue; }
-        if (st.isDirectory) { scanDropDir(full + window.path.sep, files, rootPath); }
+        if (st.isDirectory) { scanDropDir(full, files, rootPath); }
         else {
             var ext = window.path.extname(list[i]).toLowerCase();
             if (allowed[ext]) {
@@ -253,14 +256,15 @@ var cats = settingsRef.categories || [];
                     }
                     var fd = self.folders[done];
                     window.updateImportProgress({ text: '导入: ' + fd.name, detail: '(' + (done + 1) + '/' + total + ')', done: done });
-                    destPath = self.selectedPaths[fd.name] + window.path.sep + fd.name;
+                    var basePath = self.selectedPaths[fd.name].replace(/[/\\]+$/, '');
+                    var destPath = basePath + window.path.sep + fd.name;
                     // Copy first model's source directory (the whole folder)
                     var copySrc = window.path.dirname(fd.models[0].src);
                     window.copyFolder(copySrc, destPath).then(function(res) {
                         var finalDest = res.success ? (res.dest || destPath) : destPath;
                         if (res.success) {
                             fd.models.forEach(function(m) {
-                                var modelDest = finalDest + window.path.sep + window.path.basename(m.src);
+                                var modelDest = finalDest.replace(/[/\\]+$/, '') + window.path.sep + window.path.basename(m.src);
                                 window._addItemToDataJson({
                                     path: modelDest, category: self.choices[fd.name] || '人物模型',
                                     group: fd.name, tags: self.tagChoices[fd.name] || []
