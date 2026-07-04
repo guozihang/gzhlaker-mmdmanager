@@ -1891,6 +1891,27 @@ window.captureSinglePreview = function(modelPath) {
         // Remove all existing models to avoid conflicts
         if (window.model) { window.scene.remove(window.model); clearCache(window.model); window.model = null; }
         if (window.sceneModel) { window.scene.remove(window.sceneModel); clearCache(window.sceneModel); window.sceneModel = null; }
+        var captured = false;
+        function doCapture() {
+            if (captured) return;
+            captured = true;
+            setTimeout(function() {
+                window.resetCamera && window.resetCamera();
+                var renderSettings = (window.store && window.store.state.settings && window.store.state.settings.render) || { autoRotate: false, showAxis: false };
+                if (!renderSettings.autoRotate) renderSettings.autoRotate = false;
+                window.applyPreviewSettings && window.applyPreviewSettings(renderSettings);
+                if (window.model) {
+                    var dataUrl = window.capturePreview && window.capturePreview();
+                    if (dataUrl && window.savePreviewImage) {
+                        window.savePreviewImage(previewPath, dataUrl);
+                    }
+                }
+                window.applyPreviewSettings && window.applyPreviewSettings();
+                if (window.model) { var m = window.model; window.scene.remove(m); clearCache(m); window.model = null; }
+                if (window.sceneModel) { var s = window.sceneModel; window.scene.remove(s); clearCache(s); window.sceneModel = null; }
+                resolve();
+            }, 5000);
+        }
         window.loader.MMDLoader.loadModel(
             modelPath,
             function(mmd) {
@@ -1898,42 +1919,12 @@ window.captureSinglePreview = function(modelPath) {
                 mmd.userData.modelPath = modelPath;
                 window.scene.add(mmd);
                 setupModel(mmd, false);
-                setTimeout(function() {
-                    window.resetCamera && window.resetCamera();
-                    var renderSettings = (window.store && window.store.state.settings && window.store.state.settings.render) || { autoRotate: false, showAxis: false };
-                    if (!renderSettings.autoRotate) renderSettings.autoRotate = false;
-                    window.applyPreviewSettings && window.applyPreviewSettings(renderSettings);
-                    var dataUrl = window.capturePreview && window.capturePreview();
-                    if (dataUrl && window.savePreviewImage) {
-                        window.savePreviewImage(previewPath, dataUrl);
-                    }
-                    window.applyPreviewSettings && window.applyPreviewSettings();
-                    window.scene.remove(mmd);
-                    clearCache(mmd);
-                    window.model = null;
-                    resolve();
-                }, 3000);
+                doCapture();
             },
             window.onProgress,
             function(err) {
-                // Model failed to load — try to capture anyway, or create blank placeholder
-                setTimeout(function() {
-                    window.resetCamera && window.resetCamera();
-                    var renderSettings = (window.store && window.store.state.settings && window.store.state.settings.render) || { autoRotate: false, showAxis: false };
-                    if (!renderSettings.autoRotate) renderSettings.autoRotate = false;
-                    window.applyPreviewSettings && window.applyPreviewSettings(renderSettings);
-                    // Only capture if there's actually a model in the scene
-                    if (window.model) {
-                        var dataUrl = window.capturePreview && window.capturePreview();
-                        if (dataUrl && window.savePreviewImage) {
-                            window.savePreviewImage(previewPath, dataUrl);
-                        }
-                    }
-                    // Don't write blank preview — keep the file absent so it shows "无预览"
-                    window.applyPreviewSettings && window.applyPreviewSettings();
-                    if (window.model) { window.scene.remove(window.model); clearCache(window.model); window.model = null; }
-                    resolve();
-                }, 2000);
+                // Even on texture error, mesh may have loaded. Always try capture.
+                doCapture();
             }
         );
     });
@@ -1995,7 +1986,7 @@ window.autoPreviewImport = function(folderPath, onProgress) {
                             clearCache(mmd);
                             window.model = null;
                             processNext();
-                        }, 3000);
+                        }, 5000);
                     },
                     window.onProgress,
                     function() { onProgress(modelName, '失败', curIdx, total); processNext(); }
