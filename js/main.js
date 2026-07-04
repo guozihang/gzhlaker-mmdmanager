@@ -155,9 +155,6 @@ function getAllCategoryExtensions() {
             if (e) map[e] = true;
         });
     });
-    if (Object.keys(map).length === 0) {
-        map['.pmx'] = true; map['.pmd'] = true;
-    }
     return map;
 }
 
@@ -336,12 +333,6 @@ var cats = settingsRef.categories || [];
 window.showBatchClassifyDialog = function(items, callback) {
     var settingsRef = (window.store && window.store.state && window.store.state.settings) || {};
 var cats = settingsRef.categories || [];
-    if (cats.length === 0) cats = [
-        { name: '人物模型', extensions: '.pmx,.pmd' },
-        { name: '场景模型', extensions: '.pmx,.x' },
-        { name: '动作文件', extensions: '.vmd' },
-        { name: 'MME特效', extensions: '.fx,.x' }
-    ];
     var tags = settingsRef.tags || [];
     var el = document.createElement('div');
     document.body.appendChild(el);

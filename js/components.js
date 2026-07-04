@@ -25,9 +25,8 @@ function getDefaultConfig() {
             defaultModelPath: '',
             categories: [
                 { name: '人物模型', extensions: '.pmx,.pmd', parent: '', type: 'model' },
-                { name: '场景模型', extensions: '.pmx,.x', parent: '', type: 'model' },
-                { name: '动作文件', extensions: '.vmd', parent: '', type: 'motion' },
-                { name: 'MME特效', extensions: '.fx,.x', parent: '', type: 'effect' }
+                { name: '场景模型', extensions: '.pmx', parent: '', type: 'model' },
+                { name: '动作文件', extensions: '.vmd', parent: '', type: 'motion' }
             ],
             tags: [],
             scanExtensions: '',
@@ -98,7 +97,6 @@ function getMonitoredExtensionsSet() {
             if (e) map[e] = true;
         });
     });
-    if (Object.keys(map).length === 0) { map['.pmx'] = true; map['.pmd'] = true; }
     return map;
 }
 
@@ -1592,7 +1590,8 @@ var componentIndex = {
                 (data[key] || []).forEach(function (group) {
                     (group.models || []).forEach(function (mp) {
                         var ext = window.path.extname(mp).toLowerCase();
-                        if (ext === '.pmx' || ext === '.pmd' || ext === '.x') {
+                        var allowedPreviews = getMonitoredExtensionsSet();
+                        if (allowedPreviews[ext]) {
                             allModels.push(mp);
                         }
                     });
