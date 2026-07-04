@@ -414,16 +414,16 @@
 
                         <!-- ===== 种类标签配置 ===== -->
                         <el-divider content-position="left">种类标签配置</el-divider>
-                        <el-form-item label="可用后缀名">
-                            <el-input v-model="settings.availableExtensions" placeholder="逗号分隔，如 .pmx,.pmd,.vmd"></el-input>
-                            <span style="font-size:11px;color:#999;margin-top:2px;display:block">种类编辑时后缀复选框的可选项，所有扫描均以种类配置为准</span>
-                        </el-form-item>
-                        <el-form-item label="监控后缀名">
-                            <div style="display:flex;flex-wrap:wrap;gap:4px">
-                                <el-tag v-for="e in monitoredExtensions.split(',').filter(function(x){return x})" :key="e" size="small" type="info" style="cursor:default">{{e}}</el-tag>
-                                <span v-if="!monitoredExtensions" style="color:#909399;font-size:12px">暂无，请在种类中配置后缀</span>
+                        <el-form-item label="可用后缀">
+                            <div style="margin-bottom:6px;display:flex;flex-wrap:wrap;gap:4px">
+                                <el-tag v-for="(e, idx) in availableExtList" :key="e" closable @close="removeExt(idx)" size="small" type="info" style="cursor:default">{{e}}</el-tag>
+                                <span v-if="availableExtList.length===0" style="color:#909399;font-size:12px">暂无</span>
                             </div>
-                            <span style="font-size:11px;color:#999;margin-top:4px;display:block">自动从种类后缀汇总，所有扫描和过滤以此为准</span>
+                            <div style="display:flex;align-items:center;gap:4px">
+                                <el-input v-model="newExtInput" placeholder="输入后缀名，如 .pmx" style="width:160px" size="small"></el-input>
+                                <el-button size="small" type="primary" @click="addExt">添加</el-button>
+                            </div>
+                            <span style="font-size:11px;color:#999;margin-top:4px;display:block">种类编辑时后缀复选框的可选项</span>
                         </el-form-item>
                         <el-form-item label="种类管理">
                             <el-tree :data="categoryTree" node-key="name" default-expand-all style="max-width:500px">

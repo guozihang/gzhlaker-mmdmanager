@@ -32,7 +32,7 @@ function getDefaultConfig() {
             availableExtensions: '.pmx,.pmd,.x,.vmd,.fx',
             preview: {
                 ambientColor: '#666666', directionalColor: '#887766',
-                showAxis: true, autoRotate: true, cameraFov: 45, cameraDistance: 30,
+                showAxis: true, autoRotate: false, cameraFov: 45, cameraDistance: 30,
                 dualModel: false, showSkybox: true,
                 skyboxMode: 'color', skyboxImagePath: '',
                 skyColorTop: '#FFFFFF', skyColorBottom: '#F0F0F0', skyColorSide: '#FFFFFF',
@@ -251,6 +251,7 @@ var componentIndex = {
             categoryForm: { name: '', extensions: [], parent: '' },
             categoryEditIndex: -1,
             newTagInput: '',
+            newExtInput: '',
             tagEditDialogVisible: false,
             tagEditModelPath: '',
             tagEditCategory: '',
@@ -803,6 +804,23 @@ var componentIndex = {
             tags.splice(idx, 1);
             this.settings = Object.assign({}, this.settings, { tags: tags });
         },
+        addExt: function() {
+            var v = this.newExtInput.trim();
+            if (!v) return;
+            if (!v.startsWith('.')) v = '.' + v;
+            v = v.toLowerCase();
+            var list = this.availableExtList.slice();
+            if (list.indexOf(v) < 0) {
+                list.push(v);
+                this.settings = Object.assign({}, this.settings, { availableExtensions: list.join(',') });
+            }
+            this.newExtInput = '';
+        },
+        removeExt: function(idx) {
+            var list = this.availableExtList.slice();
+            list.splice(idx, 1);
+            this.settings = Object.assign({}, this.settings, { availableExtensions: list.join(',') });
+        },
         updateModel: function (path) {
             var self = this;
             // Determine model's category
@@ -1212,7 +1230,7 @@ var componentIndex = {
                     ambientColor: '#666666',
                     directionalColor: '#887766',
                     showAxis: true,
-                    autoRotate: true,
+                    autoRotate: false,
                     cameraFov: 45,
                     cameraDistance: 30,
                     coexistCategories: [],
