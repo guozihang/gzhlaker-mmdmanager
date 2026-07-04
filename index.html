@@ -129,19 +129,6 @@
                                 </div>
                             </div>
                         </el-table-column>
-                        <el-table-column label="文件夹" min-width="120">
-                            <div slot-scope="scope">
-                                <span style="font-size:13px">{{scope.row.groupName}}</span>
-                            </div>
-                        </el-table-column>
-                        <el-table-column sortable prop="modelName" label="模型名" min-width="140">
-                            <div slot-scope="scope">
-                                <div style="display:flex;align-items:center;gap:4px">
-                                    <span style="font-size:13px;word-break:break-all">{{scope.row.modelName}}</span>
-                                    <el-button type="text" size="mini" @click.stop="editTag(scope.row.path, scope.row.group)" style="padding:0;font-size:10px">编</el-button>
-                                </div>
-                            </div>
-                        </el-table-column>
                         <el-table-column label="分类" width="140">
                             <div slot-scope="scope">
                                 <span v-if="scope.row.category" style="font-size:11px;color:#e6a23c;cursor:pointer" @click="filterByCategory(scope.row.category)">{{_getCategoryPath(scope.row.category)}}</span>
