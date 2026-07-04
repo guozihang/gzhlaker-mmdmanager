@@ -1756,6 +1756,7 @@ var componentIndex = {
     },
     mounted: function() {
         window._previewModel = this.updateModel.bind(this);
+        window._regeneratePreviews = this.forceRegeneratePreviews.bind(this);
     },
 };
 // Global helper for main.js to call

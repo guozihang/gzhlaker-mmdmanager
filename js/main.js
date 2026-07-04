@@ -273,7 +273,7 @@ var cats = settingsRef.categories || [];
                         window.updateImportProgress({ visible: false });
                         window.showNotify('导入完成 (' + total + ' 个文件夹)', 'success');
                         window._reloadDataJson();
-                        if (window.app && window.app.forceRegeneratePreviews) setTimeout(function() { window.app.forceRegeneratePreviews(); }, 800);
+                        if (window._regeneratePreviews) setTimeout(function() { window._regeneratePreviews(); }, 800);
                         return;
                     }
                     var fd = self.folders[done];
