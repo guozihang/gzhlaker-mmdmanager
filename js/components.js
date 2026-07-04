@@ -89,6 +89,19 @@ function migrateConfig(raw) {
     return raw;
 }
 
+function getMonitoredExtensionsSet() {
+    var cats = (window.store && window.store.state.settings && window.store.state.settings.categories) || [];
+    var map = {};
+    cats.forEach(function(c) {
+        (c.extensions || '').split(',').forEach(function(e) {
+            e = e.trim().toLowerCase();
+            if (e) map[e] = true;
+        });
+    });
+    if (Object.keys(map).length === 0) { map['.pmx'] = true; map['.pmd'] = true; }
+    return map;
+}
+
 var componentInit = {
     template: `#tInit`,
     methods: {
@@ -1085,10 +1098,10 @@ var componentIndex = {
                             var childF = fs.readdirSync(full);
                             for (var j = 0; j < childF.length; j++) {
                                 var ext = window.path.extname(childF[j]).toLowerCase();
-                                if (ext === '.pmx' || ext === '.pmd' || ext === '.x') {
+                                var allowedExts3 = getMonitoredExtensionsSet();
+                            if (allowedExts3[ext]) {
                                     var modelPath = full + path.sep + childF[j];
                                     d.models.push(modelPath);
-                                    // Check if preview exists
                                     var pv = full + path.sep + childF[j].replace(/\.[^.]+$/, '') + '.png';
                                     if (!fs.existsSync(pv)) pendingPreviews.push(modelPath);
                                 }
@@ -1097,7 +1110,8 @@ var componentIndex = {
                         if (d.models.length > 0) list.push(d);
                     } else if (stat.isFile) {
                         var ext = window.path.extname(entries[i]).toLowerCase();
-                        if (ext === '.pmx' || ext === '.pmd' || ext === '.x') {
+                        var allowedExts4 = getMonitoredExtensionsSet();
+                        if (allowedExts4[ext]) {
                             var name = entries[i].replace(/\.[^.]+$/, '');
                             list.push({ id: list.length, name: name, address: dirPath, models: [full] });
                             var pv = dirPath + name + '.png';
