@@ -1916,20 +1916,24 @@ window.captureSinglePreview = function(modelPath) {
             },
             window.onProgress,
             function(err) {
-                // Try to capture whatever rendered, even on error
+                // Model failed to load — try to capture anyway, or create blank placeholder
                 setTimeout(function() {
                     window.resetCamera && window.resetCamera();
                     var renderSettings = (window.store && window.store.state.settings && window.store.state.settings.render) || { autoRotate: false, showAxis: false };
                     if (!renderSettings.autoRotate) renderSettings.autoRotate = false;
                     window.applyPreviewSettings && window.applyPreviewSettings(renderSettings);
-                    var dataUrl = window.capturePreview && window.capturePreview();
-                    if (dataUrl && window.savePreviewImage) {
-                        window.savePreviewImage(previewPath, dataUrl);
+                    // Only capture if there's actually a model in the scene
+                    if (window.model) {
+                        var dataUrl = window.capturePreview && window.capturePreview();
+                        if (dataUrl && window.savePreviewImage) {
+                            window.savePreviewImage(previewPath, dataUrl);
+                        }
                     }
+                    // Don't write blank preview — keep the file absent so it shows "无预览"
                     window.applyPreviewSettings && window.applyPreviewSettings();
                     if (window.model) { window.scene.remove(window.model); clearCache(window.model); window.model = null; }
                     resolve();
-                }, 3000);
+                }, 2000);
             }
         );
     });

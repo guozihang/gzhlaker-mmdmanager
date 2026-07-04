@@ -227,6 +227,24 @@ function capturePreview() {
 }
 window.capturePreview = capturePreview;
 
+window.captureCurrentModelPreview = function() {
+    if (!window.model) return;
+    var modelPath = window.model.userData.modelPath;
+    if (!modelPath) return;
+    var previewPath = window.path.dirname(modelPath) + '/' + window.path.basename(modelPath).replace(/\.[^.]+$/, '') + '.png';
+    var renderSettings = (window.store && window.store.state.settings && window.store.state.settings.render) || { autoRotate: false, showAxis: false };
+    if (!renderSettings.autoRotate) renderSettings.autoRotate = false;
+    var prevAutoRotate = window.controls ? window.controls.autoRotate : false;
+    window.applyPreviewSettings && window.applyPreviewSettings(renderSettings);
+    var dataUrl = window.capturePreview();
+    if (dataUrl && window.savePreviewImage) {
+        window.savePreviewImage(previewPath, dataUrl.replace(/\\/g, '/'));
+        window.showNotify && window.showNotify('预览图已保存', 'success');
+    }
+    window.applyPreviewSettings && window.applyPreviewSettings();
+    if (window.controls) window.controls.autoRotate = prevAutoRotate;
+};
+
 function animate() {
     requestAnimationFrame(animate);
     render();
