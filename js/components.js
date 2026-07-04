@@ -1581,6 +1581,37 @@ var componentIndex = {
                 self.message('已重新扫描 ' + allFiles.length + ' 个文件');
             }
         },
+        generatePreviewsForPaths: function(modelPaths) {
+            var self = this;
+            if (!modelPaths || modelPaths.length === 0) {
+                self.message('没有需要生成预览的模型');
+                return;
+            }
+            var total = modelPaths.length;
+            window.updateImportProgress({ visible: true, total: total, done: 0, text: '正在生成预览...' });
+            var queue = modelPaths.slice();
+            var doneCount = 0;
+            function next() {
+                if (queue.length === 0) {
+                    window.updateImportProgress({ visible: false });
+                    self._invalidatePreviewCache();
+                    self.message('预览已生成 (' + total + ' 个)');
+                    return;
+                }
+                var mp = queue.shift();
+                window.updateImportProgress({
+                    text: '预览 (' + (doneCount + 1) + '/' + total + ')',
+                    detail: window.path.basename(mp),
+                    done: doneCount
+                });
+                window.captureSinglePreview(mp).then(function () {
+                    doneCount++;
+                    window.updateImportProgress({ done: doneCount });
+                    next();
+                });
+            }
+            next();
+        },
         forceRegeneratePreviews: function() {
             var self = this;
             // Collect all model files from current data
@@ -1757,6 +1788,7 @@ var componentIndex = {
     mounted: function() {
         window._previewModel = this.updateModel.bind(this);
         window._regeneratePreviews = this.forceRegeneratePreviews.bind(this);
+        window._generatePreviewsForPaths = this.generatePreviewsForPaths.bind(this);
     },
 };
 // Global helper for main.js to call
@@ -1854,6 +1886,8 @@ window._reloadDataJson = function() {
 // Capture preview for a single model (load → render → screenshot → cleanup)
 window.captureSinglePreview = function(modelPath) {
     return new Promise(function(resolve) {
+        var previewPath = window.path.dirname(modelPath) + window.path.sep +
+            window.path.basename(modelPath).replace(/\.[^.]+$/, '') + '.png';
         // Remove all existing models to avoid conflicts
         if (window.model) { window.scene.remove(window.model); clearCache(window.model); window.model = null; }
         if (window.sceneModel) { window.scene.remove(window.sceneModel); clearCache(window.sceneModel); window.sceneModel = null; }
@@ -1864,8 +1898,6 @@ window.captureSinglePreview = function(modelPath) {
                 mmd.userData.modelPath = modelPath;
                 window.scene.add(mmd);
                 setupModel(mmd, false);
-                var previewPath = window.path.dirname(modelPath) + window.path.sep +
-                    window.path.basename(modelPath).replace(/\.[^.]+$/, '') + '.png';
                 setTimeout(function() {
                     window.resetCamera && window.resetCamera();
                     var renderSettings = (window.store && window.store.state.settings && window.store.state.settings.render) || { autoRotate: false, showAxis: false };
@@ -1883,7 +1915,22 @@ window.captureSinglePreview = function(modelPath) {
                 }, 3000);
             },
             window.onProgress,
-            function() { resolve(); }
+            function(err) {
+                // Try to capture whatever rendered, even on error
+                setTimeout(function() {
+                    window.resetCamera && window.resetCamera();
+                    var renderSettings = (window.store && window.store.state.settings && window.store.state.settings.render) || { autoRotate: false, showAxis: false };
+                    if (!renderSettings.autoRotate) renderSettings.autoRotate = false;
+                    window.applyPreviewSettings && window.applyPreviewSettings(renderSettings);
+                    var dataUrl = window.capturePreview && window.capturePreview();
+                    if (dataUrl && window.savePreviewImage) {
+                        window.savePreviewImage(previewPath, dataUrl);
+                    }
+                    window.applyPreviewSettings && window.applyPreviewSettings();
+                    if (window.model) { window.scene.remove(window.model); clearCache(window.model); window.model = null; }
+                    resolve();
+                }, 3000);
+            }
         );
     });
 };

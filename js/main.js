@@ -266,6 +266,7 @@ var cats = settingsRef.categories || [];
                 this.visible = false;
                 var self = this;
                 var total = this.folders.length;
+                var importedPaths = [];
                 window.updateImportProgress({ visible: true, total: total, done: 0, text: '正在导入...' });
                 var done = 0;
                 function next() {
@@ -273,7 +274,9 @@ var cats = settingsRef.categories || [];
                         window.updateImportProgress({ visible: false });
                         window.showNotify('导入完成 (' + total + ' 个文件夹)', 'success');
                         window._reloadDataJson();
-                        if (window._regeneratePreviews) setTimeout(function() { window._regeneratePreviews(); }, 800);
+                        if (window._generatePreviewsForPaths && importedPaths.length > 0) {
+                            setTimeout(function() { window._generatePreviewsForPaths(importedPaths); }, 800);
+                        }
                         return;
                     }
                     var fd = self.folders[done];
@@ -294,8 +297,10 @@ var cats = settingsRef.categories || [];
                                     relPath = srcAbs.slice(copySrcAbs.length).replace(/^\//, '');
                                 }
                                 var modelDest = finalDest.replace(/\\/g, '/').replace(/\/$/, '') + '/' + relPath;
+                                modelDest = modelDest.replace(/\\/g, '/');
+                                importedPaths.push(modelDest);
                                 window._addItemToDataJson({
-                                    path: modelDest.replace(/\\/g, '/'), category: self.choices[fd.name] || '人物模型',
+                                    path: modelDest, category: self.choices[fd.name] || '人物模型',
                                     group: fd.name, tags: self.tagChoices[fd.name] || []
                                 });
                             });
