@@ -1487,6 +1487,7 @@ var componentIndex = {
                     window._reloadDataJson();
                     self.$forceUpdate();
                     self.message("已添加 " + newFiles.length + " 个新文件");
+                    setTimeout(function() { router.replace('/'); }, 500);
                 });
             } else {
                 self._invalidateItemCategoryCache();
@@ -1494,6 +1495,7 @@ var componentIndex = {
                 window._reloadDataJson();
                 self.$forceUpdate();
                 self.message(newFiles.length === 0 ? "没有新文件" : "数据已刷新");
+                if (newFiles.length === 0) setTimeout(function() { router.replace('/'); }, 500);
             }
         },
         forceRescanAll: function() {
@@ -1572,6 +1574,7 @@ var componentIndex = {
                     self._bookmarkVersion = (self._bookmarkVersion || 0) + 1;
                     self.$forceUpdate();
                     self.message('已重新扫描 ' + allFiles.length + ' 个文件');
+                    setTimeout(function() { router.replace('/'); }, 500);
                 });
             } else {
                 data.settings = self.settings;
@@ -1579,6 +1582,7 @@ var componentIndex = {
                 self._cleanUnmonitoredItems();
                 window._reloadDataJson();
                 self.message('已重新扫描 ' + allFiles.length + ' 个文件');
+                setTimeout(function() { router.replace('/'); }, 500);
             }
         },
         generatePreviewsForPaths: function(modelPaths) {
@@ -1596,6 +1600,7 @@ var componentIndex = {
                     window.updateImportProgress({ visible: false });
                     self._invalidatePreviewCache();
                     self.message('预览已生成 (' + total + ' 个)');
+                    setTimeout(function() { router.replace('/'); }, 500);
                     return;
                 }
                 var mp = queue.shift();
@@ -1642,6 +1647,7 @@ var componentIndex = {
                     window.updateImportProgress({ visible: false });
                     self._invalidatePreviewCache();
                     self.message('全部预览已重新生成 (' + total + ' 个)');
+                    setTimeout(function() { router.replace('/'); }, 500);
                     return;
                 }
                 var mp = queue.shift();
