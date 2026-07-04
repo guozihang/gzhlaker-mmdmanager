@@ -286,9 +286,16 @@ var cats = settingsRef.categories || [];
                         var finalDest = res.success ? (res.dest || destPath) : destPath;
                         if (res.success) {
                             (fd._filteredModels || fd.models).forEach(function(m) {
-                                var modelDest = finalDest.replace(/[/\\]+$/, '') + '/' +window.path.basename(m.src);
+                                // Derive the actual destination path from source path relative to copySrc
+                                var srcAbs = m.src.replace(/\\/g, '/');
+                                var copySrcAbs = copySrc.replace(/\\/g, '/');
+                                var relPath = srcAbs;
+                                if (srcAbs.indexOf(copySrcAbs) === 0) {
+                                    relPath = srcAbs.slice(copySrcAbs.length).replace(/^\//, '');
+                                }
+                                var modelDest = finalDest.replace(/\\/g, '/').replace(/\/$/, '') + '/' + relPath;
                                 window._addItemToDataJson({
-                                    path: modelDest, category: self.choices[fd.name] || '人物模型',
+                                    path: modelDest.replace(/\\/g, '/'), category: self.choices[fd.name] || '人物模型',
                                     group: fd.name, tags: self.tagChoices[fd.name] || []
                                 });
                             });

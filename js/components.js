@@ -1185,7 +1185,7 @@ var componentIndex = {
                             next();
                         });
                     }
-                    setTimeout(next, 800);
+                    next();
                 }
                 startPreviews();
             });
@@ -1609,7 +1609,6 @@ var componentIndex = {
             function next() {
                 if (queue.length === 0) {
                     window.updateImportProgress({ visible: false });
-                    // Clear preview caches
                     self._invalidatePreviewCache();
                     self.message('全部预览已重新生成 (' + total + ' 个)');
                     return;
@@ -1623,10 +1622,11 @@ var componentIndex = {
                 window.captureSinglePreview(mp).then(function () {
                     doneCount++;
                     window.updateImportProgress({ done: doneCount });
+                    // Wait for current capture to fully complete before starting next
                     next();
                 });
             }
-            setTimeout(next, 500);
+            next();
         },
         _getItemCategory: function(mp) {
             if (!this._itemCategoryCache) {
