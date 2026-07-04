@@ -1883,9 +1883,9 @@ window._reloadDataJson = function() {
 // Capture preview for a single model (load → render → screenshot → cleanup)
 window.captureSinglePreview = function(modelPath) {
     return new Promise(function(resolve) {
-        var prevModel = window.model;
-        if (prevModel) window.scene.remove(prevModel);
-        window.model = null;
+        // Remove all existing models to avoid conflicts
+        if (window.model) { window.scene.remove(window.model); clearCache(window.model); window.model = null; }
+        if (window.sceneModel) { window.scene.remove(window.sceneModel); clearCache(window.sceneModel); window.sceneModel = null; }
         window.loader.MMDLoader.loadModel(
             modelPath,
             function(mmd) {
@@ -1897,7 +1897,6 @@ window.captureSinglePreview = function(modelPath) {
                     window.path.basename(modelPath).replace(/\.[^.]+$/, '') + '.png';
                 setTimeout(function() {
                     window.resetCamera && window.resetCamera();
-                    // Always use render settings with autoRotate forced off for preview capture
                     var renderSettings = (window.store && window.store.state.settings && window.store.state.settings.render) || { autoRotate: false, showAxis: false };
                     if (!renderSettings.autoRotate) renderSettings.autoRotate = false;
                     window.applyPreviewSettings && window.applyPreviewSettings(renderSettings);
@@ -1905,11 +1904,10 @@ window.captureSinglePreview = function(modelPath) {
                     if (dataUrl && window.savePreviewImage) {
                         window.savePreviewImage(previewPath, dataUrl);
                     }
-                    // Restore user preview settings
                     window.applyPreviewSettings && window.applyPreviewSettings();
                     window.scene.remove(mmd);
+                    clearCache(mmd);
                     window.model = null;
-                    if (prevModel) { window.scene.add(prevModel); window.model = prevModel; }
                     resolve();
                 }, 2000);
             },
@@ -1930,27 +1928,21 @@ window.autoPreviewImport = function(folderPath, onProgress) {
             var modelFiles = [];
             for (var i = 0; i < files.length; i++) {
                 var ext = window.path.extname(files[i]).toLowerCase();
-                if (ext === '.pmx' || ext === '.pmd') {
+                var allowedPreviews2 = getMonitoredExtensionsSet();
+                if (allowedPreviews2[ext]) {
                     modelFiles.push(folderPath + '/' + files[i]);
                 }
             }
             if (modelFiles.length === 0) { resolveAll(); return; }
 
-            var prevModel = window.model;
-            if (prevModel) window.scene.remove(prevModel);
-            window.model = null;
+            // Remove all existing models
+            if (window.model) { window.scene.remove(window.model); clearCache(window.model); window.model = null; }
+            if (window.sceneModel) { window.scene.remove(window.sceneModel); clearCache(window.sceneModel); window.sceneModel = null; }
 
             var idx = 0;
             var total = modelFiles.length;
             function processNext() {
-                if (idx >= modelFiles.length) {
-                    if (prevModel) {
-                        window.scene.add(prevModel);
-                        window.model = prevModel;
-                    }
-                    resolveAll();
-                    return;
-                }
+                if (idx >= modelFiles.length) { resolveAll(); return; }
                 var modelPath = modelFiles[idx];
                 var modelName = window.path.basename(modelPath);
                 var curIdx = idx + 1;
@@ -1978,6 +1970,7 @@ window.autoPreviewImport = function(folderPath, onProgress) {
                             window.applyPreviewSettings && window.applyPreviewSettings();
                             onProgress(modelName, '完成', curIdx, total);
                             window.scene.remove(mmd);
+                            clearCache(mmd);
                             window.model = null;
                             processNext();
                         }, 2000);
