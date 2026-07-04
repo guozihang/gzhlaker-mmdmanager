@@ -1854,11 +1854,10 @@ window.captureSinglePreview = function(modelPath) {
                     window.path.basename(modelPath).replace(/\.[^.]+$/, '') + '.png';
                 setTimeout(function() {
                     window.resetCamera && window.resetCamera();
-                    // Apply render settings for preview generation
-                    var renderSettings = window.store && window.store.state.settings && window.store.state.settings.render;
-                    if (renderSettings) {
-                        window.applyPreviewSettings && window.applyPreviewSettings(renderSettings);
-                    }
+                    // Always use render settings with autoRotate forced off for preview capture
+                    var renderSettings = (window.store && window.store.state.settings && window.store.state.settings.render) || { autoRotate: false, showAxis: false };
+                    if (!renderSettings.autoRotate) renderSettings.autoRotate = false;
+                    window.applyPreviewSettings && window.applyPreviewSettings(renderSettings);
                     var dataUrl = window.capturePreview && window.capturePreview();
                     if (dataUrl && window.savePreviewImage) {
                         window.savePreviewImage(previewPath, dataUrl);
@@ -1926,10 +1925,9 @@ window.autoPreviewImport = function(folderPath, onProgress) {
                             window.path.basename(modelPath).replace(/\.[^.]+$/, '') + '.png';
                         setTimeout(function() {
                             window.resetCamera && window.resetCamera();
-                            var renderSettings = window.store && window.store.state.settings && window.store.state.settings.render;
-                            if (renderSettings) {
-                                window.applyPreviewSettings && window.applyPreviewSettings(renderSettings);
-                            }
+                            var renderSettings = (window.store && window.store.state.settings && window.store.state.settings.render) || { autoRotate: false, showAxis: false };
+                            if (!renderSettings.autoRotate) renderSettings.autoRotate = false;
+                            window.applyPreviewSettings && window.applyPreviewSettings(renderSettings);
                             var dataUrl = window.capturePreview && window.capturePreview();
                             if (dataUrl && window.savePreviewImage) {
                                 window.savePreviewImage(previewPath, dataUrl);
