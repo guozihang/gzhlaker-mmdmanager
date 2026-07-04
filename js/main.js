@@ -204,79 +204,70 @@ var cats = settingsRef.categories || [];
     var selectedPaths = {};
     var choices = {};
     var tagChoices = {};
+    // Group by source folder
+    var folders = {}, folderList = [];
     files.forEach(function(f) {
-        selectedPaths[f.src] = dataPaths[0].path;
-        choices[f.src] = dataPaths[0].category || '人物模型';
-        tagChoices[f.src] = (dataPaths[0].tags || []).slice();
+        var key = f.relDir || window.path.basename(window.path.dirname(f.src));
+        if (!folders[key]) { folders[key] = { name: key, models: [] }; folderList.push(folders[key]); }
+        folders[key].models.push(f);
+    });
+    folderList.forEach(function(fd) {
+        selectedPaths[fd.name] = dataPaths[0].path;
+        choices[fd.name] = dataPaths[0].category || '人物模型';
+        tagChoices[fd.name] = (dataPaths[0].tags || []).slice();
     });
 
     var vm = new Vue({
         el: el,
         data: {
-            files: files, dataPaths: dataPaths, selectedPaths: selectedPaths,
+            folders: folderList, dataPaths: dataPaths, selectedPaths: selectedPaths,
             choices: choices, tagChoices: tagChoices, categories: cats, tags: tags,
             visible: true
         },
         methods: {
-            onFilePathChange: function(src) {
-                var dpEntry = this.dataPaths.find(function(p) { return p.path === this.selectedPaths[src]; }.bind(this));
+            onFolderPathChange: function(fd) {
+                var dpEntry = this.dataPaths.find(function(p) { return p.path === this.selectedPaths[fd.name]; }.bind(this));
                 if (!dpEntry) return;
-                this.choices[src] = dpEntry.category || '人物模型';
-                this.tagChoices[src] = (dpEntry.tags || []).slice();
+                this.choices[fd.name] = dpEntry.category || '人物模型';
+                this.tagChoices[fd.name] = (dpEntry.tags || []).slice();
             },
-            preview: function(path) {
-                if (window._previewModel) window._previewModel(path);
-            },
-            toggleTag: function(src, tag) {
-                var arr = this.tagChoices[src];
-                if (!arr) { this.$set(this.tagChoices, src, []); arr = this.tagChoices[src]; }
+            preview: function(path) { if (window._previewModel) window._previewModel(path); },
+            toggleTag: function(key, tag) {
+                var arr = this.tagChoices[key];
+                if (!arr) { this.$set(this.tagChoices, key, []); arr = this.tagChoices[key]; }
                 var idx = arr.indexOf(tag);
                 if (idx >= 0) arr.splice(idx, 1); else arr.push(tag);
-            },
-            toggleAllTag: function(tag) {
-                var all = this.files.every(function(f) { return this.tagChoices[f.src] && this.tagChoices[f.src].indexOf(tag) >= 0; }.bind(this));
-                var self = this;
-                this.files.forEach(function(f) {
-                    if (!self.tagChoices[f.src]) self.$set(self.tagChoices, f.src, []);
-                    var arr = self.tagChoices[f.src];
-                    var idx = arr.indexOf(tag);
-                    if (all && idx >= 0) arr.splice(idx, 1);
-                    else if (!all && idx < 0) arr.push(tag);
-                });
             },
             confirm: function() {
                 this.visible = false;
                 var self = this;
-                var total = this.files.length;
-                if (total === 0) { window.showNotify('没有可导入的文件', 'warning'); return; }
+                var total = this.folders.length;
                 window.updateImportProgress({ visible: true, total: total, done: 0, text: '正在导入...' });
                 var done = 0;
                 function next() {
                     if (done >= total) {
                         window.updateImportProgress({ visible: false });
-                        window.showNotify('导入完成 (' + total + ' 个文件)', 'success');
-                        if (window.app && window.app.forceRescan) {
-                            setTimeout(function() { window.app.forceRescan(); }, 500);
-                        }
+                        window.showNotify('导入完成 (' + total + ' 个文件夹)', 'success');
+                        if (window.app && window.app.forceRescan) setTimeout(function() { window.app.forceRescan(); }, 500);
                         return;
                     }
-                    var f = self.files[done];
-                    window.updateImportProgress({ text: '导入: ' + f.name, detail: '(' + (done + 1) + '/' + total + ')', done: done });
-                    var baseName = f.relDir ? (f.relDir + window.path.sep + window.path.basename(f.src)) : window.path.basename(f.src);
-                    var destPath = self.selectedPaths[f.src] + window.path.sep + baseName;
-                    window.copyFolder(f.src, destPath).then(function(res) {
+                    var fd = self.folders[done];
+                    window.updateImportProgress({ text: '导入: ' + fd.name, detail: '(' + (done + 1) + '/' + total + ')', done: done });
+                    destPath = self.selectedPaths[fd.name] + window.path.sep + fd.name;
+                    // Copy first model's source directory (the whole folder)
+                    var copySrc = window.path.dirname(fd.models[0].src);
+                    window.copyFolder(copySrc, destPath).then(function(res) {
                         var finalDest = res.success ? (res.dest || destPath) : destPath;
                         if (res.success) {
-                            window._addItemToDataJson({
-                                path: finalDest,
-                                category: self.choices[f.src] || '人物模型',
-                                group: window.path.basename(window.path.dirname(finalDest)),
-                                tags: self.tagChoices[f.src] || []
+                            fd.models.forEach(function(m) {
+                                var modelDest = finalDest + window.path.sep + window.path.basename(m.src);
+                                window._addItemToDataJson({
+                                    path: modelDest, category: self.choices[fd.name] || '人物模型',
+                                    group: fd.name, tags: self.tagChoices[fd.name] || []
+                                });
                             });
                         }
-                        done++;
-                        window.updateImportProgress({ done: done });
-                        next();
+                        done++; window.updateImportProgress({ done: done }); next();
                     });
                 }
                 next();
@@ -285,24 +276,28 @@ var cats = settingsRef.categories || [];
         },
         template:
             '<div>' +
-            '<el-dialog title="导入文件" :visible.sync="visible" width="860px" :close-on-click-modal="false">' +
-            '  <div style="max-height:450px;overflow-y:auto">' +
-            '    <div v-for="f in files" :key="f.src" style="display:flex;align-items:center;padding:6px 0;border-bottom:1px solid #eee;gap:8px">' +
-            '      <el-button size="mini" circle @click="preview(f.src)">模</el-button>' +
-            '      <div style="flex:1;min-width:0;font-size:13px;word-break:break-all">{{f.name}}</div>' +
-            '      <el-select v-model="selectedPaths[f.src]" size="small" style="width:200px;flex-shrink:0" @change="onFilePathChange(f.src)" placeholder="保存路径">' +
-            '        <el-option v-for="dp in dataPaths" :key="dp.path" :label="dp.path" :value="dp.path"></el-option>' +
-            '      </el-select>' +
-            '      <el-select v-model="choices[f.src]" size="small" style="width:120px;flex-shrink:0">' +
-            '        <el-option v-for="c in categories" :key="c.name" :label="c.name" :value="c.name"></el-option>' +
-            '      </el-select>' +
-            '      <div v-if="tags.length" style="display:flex;gap:2px;flex-shrink:0;max-width:120px;flex-wrap:wrap">' +
-            '        <span v-for="t in tags" :key="t" style="font-size:9px;border-radius:2px;padding:1px 4px;cursor:pointer" :style="tagChoices[f.src]&&tagChoices[f.src].indexOf(t)>=0?\'background:#67c23a;color:#fff\':\'background:#eee;color:#999\'" @click="toggleTag(f.src, t)">{{t}}</span>' +
+            '<el-dialog title="导入文件夹" :visible.sync="visible" width="780px" :close-on-click-modal="false">' +
+            '  <div style="max-height:400px;overflow-y:auto">' +
+            '    <div v-for="fd in folders" :key="fd.name" style="padding:8px 0;border-bottom:1px solid #eee">' +
+            '      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">' +
+            '        <span style="font-size:14px;font-weight:bold;flex:1">{{fd.name}}</span>' +
+            '        <el-select v-model="selectedPaths[fd.name]" size="small" style="width:200px" @change="onFolderPathChange(fd)">' +
+            '          <el-option v-for="dp in dataPaths" :key="dp.path" :label="dp.path" :value="dp.path"></el-option>' +
+            '        </el-select>' +
+            '        <el-select v-model="choices[fd.name]" size="small" style="width:120px">' +
+            '          <el-option v-for="c in categories" :key="c.name" :label="c.name" :value="c.name"></el-option>' +
+            '        </el-select>' +
+            '      </div>' +
+            '      <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">' +
+            '        <el-button v-for="m in fd.models" :key="m.src" size="mini" circle @click="preview(m.src)">模</el-button>' +
+            '        <div v-if="tags.length" style="display:flex;gap:2px;flex-wrap:wrap">' +
+            '          <span v-for="t in tags" :key="t" style="font-size:9px;border-radius:2px;padding:1px 4px;cursor:pointer" :style="tagChoices[fd.name]&&tagChoices[fd.name].indexOf(t)>=0?\'background:#67c23a;color:#fff\':\'background:#eee;color:#999\'" @click="toggleTag(fd.name, t)">{{t}}</span>' +
+            '        </div>' +
             '      </div>' +
             '    </div>' +
             '  </div>' +
             '  <span slot="footer">' +
-            '    <el-button type="primary" size="small" @click="confirm">导入 (' + files.length + ' 个文件)</el-button>' +
+            '    <el-button type="primary" size="small" @click="confirm">导入 (' + folderList.length + ' 个文件夹)</el-button>' +
             '  </span>' +
             '</el-dialog>' +
             '</div>',
@@ -322,38 +317,41 @@ var cats = settingsRef.categories || [];
     var tags = settingsRef.tags || [];
     var el = document.createElement('div');
     document.body.appendChild(el);
+    // Group by folder
+    var folders = {}, folderList = [];
+    items.forEach(function(r) {
+        var groupName = r.group || window.path.basename(window.path.dirname(r.src));
+        if (!folders[groupName]) { folders[groupName] = { name: groupName, models: [] }; folderList.push(folders[groupName]); }
+        folders[groupName].models.push(r);
+    });
     var choices = {};
     var tagChoices = {};
-    items.forEach(function(r) {
-        choices[r.src] = r.defaultCategory || cats[0].name;
-        tagChoices[r.src] = (r.defaultTags || []).slice();
+    folderList.forEach(function(fd) {
+        var first = fd.models[0];
+        choices[fd.name] = first.defaultCategory || cats[0].name;
+        tagChoices[fd.name] = (first.defaultTags || []).slice();
     });
     var vm = new Vue({
         el: el,
-        data: { choices: choices, tagChoices: tagChoices, items: items, categories: cats, tags: tags, visible: true },
+        data: { folders: folderList, choices: choices, tagChoices: tagChoices, categories: cats, tags: tags, visible: true },
         methods: {
-            preview: function(path) {
-                if (window._previewModel) window._previewModel(path);
-            },
-            toggleTag: function(src, tag) {
-                var arr = this.tagChoices[src];
-                if (!arr) { this.$set(this.tagChoices, src, []); arr = this.tagChoices[src]; }
+            preview: function(path) { if (window._previewModel) window._previewModel(path); },
+            toggleTag: function(key, tag) {
+                var arr = this.tagChoices[key];
+                if (!arr) { this.$set(this.tagChoices, key, []); arr = this.tagChoices[key]; }
                 var idx = arr.indexOf(tag);
-                if (idx >= 0) arr.splice(idx, 1);
-                else arr.push(tag);
+                if (idx >= 0) arr.splice(idx, 1); else arr.push(tag);
             },
             allTagSelected: function(tag) {
                 var self = this;
-                return this.items.every(function(item) {
-                    return self.tagChoices[item.src] && self.tagChoices[item.src].indexOf(tag) >= 0;
-                });
+                return this.folders.every(function(fd) { return self.tagChoices[fd.name] && self.tagChoices[fd.name].indexOf(tag) >= 0; });
             },
             toggleAllTag: function(tag) {
                 var all = this.allTagSelected(tag);
                 var self = this;
-                this.items.forEach(function(item) {
-                    if (!self.tagChoices[item.src]) self.$set(self.tagChoices, item.src, []);
-                    var arr = self.tagChoices[item.src];
+                this.folders.forEach(function(fd) {
+                    if (!self.tagChoices[fd.name]) self.$set(self.tagChoices, fd.name, []);
+                    var arr = self.tagChoices[fd.name];
                     var idx = arr.indexOf(tag);
                     if (all && idx >= 0) arr.splice(idx, 1);
                     else if (!all && idx < 0) arr.push(tag);
@@ -361,7 +359,14 @@ var cats = settingsRef.categories || [];
             },
             confirm: function() {
                 this.visible = false;
-                callback(this.choices, this.tagChoices);
+                var out = {}, outTags = {};
+                this.folders.forEach(function(fd) {
+                    fd.models.forEach(function(m) {
+                        out[m.src] = choices[fd.name];
+                        outTags[m.src] = (tagChoices[fd.name] || []).slice();
+                    });
+                });
+                callback(out, outTags);
                 setTimeout(function() { vm.$destroy(); if (el.parentNode) el.parentNode.removeChild(el); }, 300);
             },
         },
@@ -373,20 +378,19 @@ var cats = settingsRef.categories || [];
             '    <el-tag v-for="t in tags" :key="t" size="small" :type="allTagSelected(t)?\'success\':\'info\'" style="cursor:pointer" @click="toggleAllTag(t)">{{t}}</el-tag>' +
             '  </div>' +
             '  <div style="max-height:400px;overflow-y:auto">' +
-            '    <div v-for="item in items" :key="item.src" style="display:flex;align-items:flex-start;padding:6px 0;border-bottom:1px solid #eee;gap:8px">' +
-            '      <el-button size="mini" circle @click="preview(item.src)" title="预览模型">模</el-button>' +
-            '      <div style="flex:1;min-width:0">' +
-            '        <div style="font-size:13px;word-break:break-all">{{item.name}}</div>' +
-            '        <div style="font-size:10px;color:#909399;margin-top:1px">' +
-            '          <span style="color:#e6a23c">{{item.defaultCategory||""}}</span>' +
-            '        </div>' +
-            '        <div v-if="tags.length" style="margin-top:3px;display:flex;flex-wrap:wrap;gap:2px">' +
-            '          <span v-for="t in tags" :key="t" style="font-size:9px;border-radius:2px;padding:1px 4px;cursor:pointer" :style="tagChoices[item.src]&&tagChoices[item.src].indexOf(t)>=0?\'background:#67c23a;color:#fff\':\'background:#eee;color:#999\'" @click="toggleTag(item.src, t)">{{t}}</span>' +
+            '    <div v-for="fd in folders" :key="fd.name" style="padding:8px 0;border-bottom:1px solid #eee">' +
+            '      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">' +
+            '        <span style="font-size:14px;font-weight:bold;flex:1">{{fd.name}}</span>' +
+            '        <el-select v-model="choices[fd.name]" size="small" style="width:140px;flex-shrink:0">' +
+            '          <el-option v-for="c in categories" :key="c.name" :label="c.name" :value="c.name"></el-option>' +
+            '        </el-select>' +
+            '      </div>' +
+            '      <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">' +
+            '        <el-button v-for="m in fd.models" :key="m.src" size="mini" circle @click="preview(m.src)">模</el-button>' +
+            '        <div v-if="tags.length" style="display:flex;gap:2px;flex-wrap:wrap">' +
+            '          <span v-for="t in tags" :key="t" style="font-size:9px;border-radius:2px;padding:1px 4px;cursor:pointer" :style="tagChoices[fd.name]&&tagChoices[fd.name].indexOf(t)>=0?\'background:#67c23a;color:#fff\':\'background:#eee;color:#999\'" @click="toggleTag(fd.name, t)">{{t}}</span>' +
             '        </div>' +
             '      </div>' +
-            '      <el-select v-model="choices[item.src]" size="small" style="width:140px;flex-shrink:0">' +
-            '        <el-option v-for="c in categories" :key="c.name" :label="c.name" :value="c.name"></el-option>' +
-            '      </el-select>' +
             '    </div>' +
             '  </div>' +
             '  <span slot="footer">' +
