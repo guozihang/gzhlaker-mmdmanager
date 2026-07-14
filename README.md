@@ -1,4 +1,7 @@
+# 重要！请下载带有 Setup 字样的安装程序！！
+
 # MMDManager
+
 
 MikuMikuDance（MMD）模型/场景/动作/特效资源管理器。支持拖拽导入、3D 预览、批量截图、一键导出到 MMD。
 
