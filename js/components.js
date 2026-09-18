@@ -242,12 +242,6 @@ var componentIndex = {
     template: `#tIndex`,
     data() {
         return {
-            visible: false,
-            currentPageModels: 1,
-            currentPageScenes: 1,
-            currentPageMmes: 1,
-            currentPageVmds: 1,
-            currentCategory: '',
             categoryDialogVisible: false,
             categoryDialogTitle: '',
             categoryForm: { name: '', extensions: [], parent: '' },
@@ -276,35 +270,6 @@ var componentIndex = {
         };
     },
     computed: {
-        mData: {
-            get() {
-                return this.$store.state.data;
-            },
-            set(value) {
-                this.$store.commit("data", value);
-            },
-        },
-        search: {
-            get() {
-                return this.searchText;
-            },
-            set(value) {
-                this.searchText = value;
-            },
-        },
-        tag: {
-            get() {
-                var tagFilter = this.activeFilters.filter(function(f) { return f.type === 'tag'; });
-                return tagFilter.length > 0 ? tagFilter[tagFilter.length - 1].value : '';
-            },
-            set(value) {
-                if (value) {
-                    if (!this.activeFilters.some(function(f) { return f.type === 'tag' && f.value === value; })) {
-                        this.activeFilters.push({ type: 'tag', value: value });
-                    }
-                }
-            },
-        },
         showPath: {
             get() {
                 return this.$store.state.showPath;
@@ -313,24 +278,9 @@ var componentIndex = {
                 this.$store.commit("showPath", value);
             },
         },
-        models: {
-            get() { return this.applyFilters(this.mData.models); },
-        },
-        scenes: {
-            get() { return this.applyFilters(this.mData.scenes); },
-        },
-        mmes: {
-            get() { return this.applyFilters(this.mData.mmes); },
-        },
-        vmds: {
-            get() { return this.applyFilters(this.mData.vmds); },
-        },
         important: {
             get() {
                 return this.$store.state.important;
-            },
-            set(value) {
-                this.$store.commit("important", value);
             },
         },
         settings: {
@@ -341,17 +291,8 @@ var componentIndex = {
                 this.$store.commit("settings", value);
             },
         },
-        importProgress: {
-            get() { return window._importProgress || {}; },
-        },
         categories: {
             get() { return this.$store.state.settings.categories || []; },
-        },
-        topCategories: {
-            // Top-level categories for tab generation
-            get() {
-                return this.categories.filter(function(c) { return !c.parent; });
-            },
         },
         categoryDataMap: {
             // Map category name → store data key
@@ -368,12 +309,6 @@ var componentIndex = {
                 return map;
             },
         },
-        currentCategoryObj: {
-            get() {
-                // Always return null to show all data. Category filtering is done by applyFilters.
-                return null;
-            },
-        },
         categoryTree: {
             get() {
                 var cats = this.categories;
@@ -384,24 +319,6 @@ var componentIndex = {
                 }
                 return buildTree('');
             },
-        },
-        pageSize: {
-            get() {
-                var s = this.$store.state.settings;
-                return (s && s.preview && s.preview.pageSize) || 20;
-            },
-        },
-        pagedModels: {
-            get() { return this.paginate(this.models, this.currentPageModels); },
-        },
-        pagedScenes: {
-            get() { return this.paginate(this.scenes, this.currentPageScenes); },
-        },
-        pagedMmes: {
-            get() { return this.paginate(this.mmes, this.currentPageMmes); },
-        },
-        pagedVmds: {
-            get() { return this.paginate(this.vmds, this.currentPageVmds); },
         },
         availableExtList: {
             get() {
@@ -426,7 +343,7 @@ var componentIndex = {
             get() {
                 var _trigger = this._bookmarkVersion; // re-evaluate on edit
                 var self = this;
-                var data = this.getCategoryData(this.currentCategoryObj);
+                var data = this.getCategoryData(null);
                 var items = [];
                 data.forEach(function (group) {
                     var models = group.models || [];
@@ -447,11 +364,6 @@ var componentIndex = {
         },
     },
     methods: {
-        paginate: function(arr, page) {
-            var size = this.pageSize;
-            var start = (page - 1) * size;
-            return arr.slice(start, start + size);
-        },
         open: function (address) {
             window.shell.openPath(address);
         },
@@ -507,9 +419,6 @@ var componentIndex = {
             if (!cache) { this._getItemCategory(mp); cache = this._itemCategoryCache; }
             return cache && cache['__bm__' + mp];
         },
-        del: function (id) {
-            // No longer needed — handled by vip toggle
-        },
         save: function () {
             var dp = PathManager.getDataFullPath();
             var data = {};
@@ -529,39 +438,6 @@ var componentIndex = {
         },
         copy: function (data) {
             window.clipboard.writeText(data);
-        },
-        isSubStr: function (item) {
-            if (item.name.toLowerCase().indexOf(this.search.toLowerCase()) != -1) {
-                return true;
-            } else {
-                return false;
-            }
-        },
-        isHasTag: function (item) {
-            console.log(item);
-            if ("info" in item) {
-                if ("tags" in item.info) {
-                    return item.info.tags.includes(this.tag);
-                }
-            } else {
-                return false;
-            }
-        },
-        format: function (row) {
-            let name = row.name;
-            return this.isSubStr(name, search);
-        },
-        getModelsNum: function () {
-            return this.models ? this.models.length : 0;
-        },
-        getScenesNum: function () {
-            return this.scenes ? this.scenes.length : 0;
-        },
-        getMmesNum: function () {
-            return this.mmes ? this.mmes.length : 0;
-        },
-        getVmdsNum: function () {
-            return this.vmds ? this.vmds.length : 0;
         },
         changeTag: function (tagName) {
             if (!this.activeFilters.some(function(f) { return f.type === 'tag' && f.value === tagName; })) {
@@ -1073,124 +949,6 @@ var componentIndex = {
                 self.message("保存失败: " + e.message);
             }
         },
-        _reloadData: function() {
-            var self = this;
-            var pendingPreviews = [];
-            var m = [], s = [], mm = [], v = [];
-            var seenPaths = {};
-            function scanModelDir(dirPath, list) {
-                if (!fs.existsSync(dirPath)) return;
-                var entries = fs.readdirSync(dirPath);
-                for (var i = 0; i < entries.length; i++) {
-                    var full = dirPath + entries[i];
-                    var stat;
-                    try { stat = fs.lstatSync(full); } catch(e) { continue; }
-                    if (stat.isDirectory) {
-                        // Scan subdirectory for models (works for both modes)
-                        var d = { id: list.length, name: entries[i], address: full + '/', models: [] };
-                        try {
-                            var childF = fs.readdirSync(full);
-                            for (var j = 0; j < childF.length; j++) {
-                                var ext = window.path.extname(childF[j]).toLowerCase();
-                                var allowedExts3 = getMonitoredExtensionsSet();
-                            if (allowedExts3[ext]) {
-                                    var modelPath = full + path.sep + childF[j];
-                                    d.models.push(modelPath);
-                                    var pv = full + path.sep + childF[j].replace(/\.[^.]+$/, '') + '.png';
-                                    if (!fs.existsSync(pv)) pendingPreviews.push(modelPath);
-                                }
-                            }
-                        } catch(e) {}
-                        if (d.models.length > 0) list.push(d);
-                    } else if (stat.isFile) {
-                        var ext = window.path.extname(entries[i]).toLowerCase();
-                        var allowedExts4 = getMonitoredExtensionsSet();
-                        if (allowedExts4[ext]) {
-                            var name = entries[i].replace(/\.[^.]+$/, '');
-                            list.push({ id: list.length, name: name, address: dirPath, models: [full] });
-                            var pv = dirPath + name + '.png';
-                            if (!fs.existsSync(pv)) pendingPreviews.push(full);
-                        }
-                    }
-                }
-            }
-            // Iterate all configured data paths
-            var dataPaths = this.settings.dataPaths || [];
-            if (dataPaths.length === 0) dataPaths = [{ path: '', category: '人物模型', tags: [] }];
-            var processedDirs = {};
-            dataPaths.forEach(function(dpEntry) {
-                var dp = dpEntry.path;
-                if (processedDirs[dp]) return;
-                processedDirs[dp] = true;
-                scanModelDir(dp + path.sep, m);
-                // VMDs
-                if (fs.existsSync(dp)) {
-                    var vmds = fs.readdirSync(dp);
-                    for (var i1 = 0; i1 < vmds.length; i1++) {
-                        var entryPath = dp + path.sep + vmds[i1];
-                        var entryStat;
-                        try { entryStat = fs.lstatSync(entryPath); } catch(e) { continue; }
-                        if (entryStat.isFile && window.path.extname(vmds[i1]).toLowerCase() === '.vmd') {
-                            v.push({ id: v.length, name: vmds[i1], address: entryPath + '/', vmds: [entryPath] });
-                        } else if (entryStat.isDirectory) {
-                            var vd = { id: v.length, name: vmds[i1], address: entryPath + '/', vmds: [] };
-                            try {
-                                var sf = fs.readdirSync(entryPath);
-                                for (var j1 = 0; j1 < sf.length; j1++) {
-                                    if (window.path.extname(sf[j1]).toLowerCase() === '.vmd') {
-                                        vd.vmds.push(entryPath + '/' + sf[j1]);
-                                    }
-                                }
-                            } catch(e) {}
-                            v.push(vd);
-                        }
-                    }
-                    // MMEs
-                    var mmes = fs.readdirSync(dp);
-                    for (var ii1 = 0; ii1 < mmes.length; ii1++) {
-                        var mmePath = dp + path.sep + mmes[ii1];
-                        var mmeStat;
-                        try { mmeStat = fs.lstatSync(mmePath); } catch(e) { continue; }
-                        if (mmeStat.isDirectory) {
-                            mm.push({ id: mm.length, name: mmes[ii1], address: mmePath + '/' });
-                        }
-                    }
-                }
-            });
-            // Deduplicate previews
-            var uniquePreviews = [];
-            var seen = {};
-            for (var pi = 0; pi < pendingPreviews.length; pi++) {
-                if (!seen[pendingPreviews[pi]]) { seen[pendingPreviews[pi]] = true; uniquePreviews.push(pendingPreviews[pi]); }
-            }
-            pendingPreviews = uniquePreviews;
-
-            this.$store.commit('data', { models: m, scenes: s, vmds: v, mmes: mm });
-
-            // Queue preview generation
-            var self2 = this;
-            this._pendingPreviewPromise = new Promise(function(resolveAll) {
-                function startPreviews() {
-                    if (pendingPreviews.length === 0) { resolveAll(); return; }
-                    var total = pendingPreviews.length;
-                    window.updateImportProgress({ visible: true, total: total, done: 0, text: '正在生成模型预览...' });
-                    var queue = pendingPreviews.slice();
-                    var doneCount = 0;
-                    function next() {
-                        if (queue.length === 0) { window.updateImportProgress({ visible: false }); resolveAll(); return; }
-                        var mp = queue.shift();
-                        window.updateImportProgress({ text: '正在生成预览 (' + (doneCount + 1) + '/' + total + ')', detail: window.path.basename(mp) });
-                        window.captureSinglePreview(mp).then(function() {
-                            doneCount++;
-                            window.updateImportProgress({ done: doneCount });
-                            next();
-                        });
-                    }
-                    next();
-                }
-                startPreviews();
-            });
-        },
         resetSettings: function() {
             var defaults = {
                 dataPath: '',
@@ -1382,11 +1140,6 @@ var componentIndex = {
             this.settings = Object.assign({}, this.settings, { categories: cats });
             this.categoryDialogVisible = false;
         },
-        onCategoryChange: function() {
-            this.searchText = '';
-            this.activeFilters = [];
-            this.currentPageModels = 1;
-        },
         getCategoryData: function(cat) {
             var raw = [];
             if (!cat || !cat.name) {
@@ -1402,35 +1155,6 @@ var componentIndex = {
             }
             // Apply active filters
             return this.applyFilters(raw);
-        },
-        getCategoryType: function(cat) {
-            if (!cat) return 'model'; // Show all: default to model columns
-            if (cat.type) return cat.type;
-            // Fallback: determine from extensions
-            var exts = (cat.extensions || '').toLowerCase();
-            if (exts.indexOf('.pmx') >= 0 || exts.indexOf('.pmd') >= 0) return 'model';
-            if (exts.indexOf('.vmd') >= 0) return 'motion';
-            return 'effect';
-        },
-        getCategoryCount: function(cat) {
-            // Count unfiltered data
-            var allData = this.$store.state.data;
-            var count = 0;
-            if (cat && cat.name) {
-                var key = this.categoryDataMap[cat.name] || cat.name;
-                var arr = allData[key] || [];
-                arr.forEach(function(d) { count += (d.models || d.vmds || []).length; });
-            } else {
-                for (var k in allData) {
-                    if (k === 'project') continue;
-                    var arr2 = allData[k] || [];
-                    arr2.forEach(function(d) { count += (d.models || d.vmds || []).length; });
-                }
-            }
-            return count;
-        },
-        addItemToDataJson: function(item) {
-            window._addItemToDataJson(item);
         },
         _reloadDataJson: function() {
             window._reloadDataJson();
@@ -1703,16 +1427,6 @@ var componentIndex = {
             }
             return '';
         },
-        getGroupCategories: function(group) {
-            var cats = [];
-            var models = group.models || [];
-            for (var i = 0; i < models.length; i++) {
-                var cat = this._getItemCategory(models[i]);
-                if (!cat) cat = this._deriveCategoryFromStore(models[i]);
-                if (cat && cats.indexOf(cat) < 0) cats.push(cat);
-            }
-            return cats;
-        },
         _getCategoryPath: function(name) {
             // Build full path like "人物模型 > 子分类"
             var parts = [name];
@@ -1745,20 +1459,6 @@ var componentIndex = {
                 if (!found) break;
             }
             return false;
-        },
-        _getCategoryDescendants: function(name) {
-            var result = [name];
-            var cats = this.categories || [];
-            function collectChildren(parent) {
-                cats.forEach(function(c) {
-                    if (c.parent === parent) {
-                        result.push(c.name);
-                        collectChildren(c.name);
-                    }
-                });
-            }
-            collectChildren(name);
-            return result;
         },
         _cleanUnmonitoredItems: function() {
             var allowed = {};
@@ -1798,7 +1498,9 @@ var componentIndex = {
         window._generatePreviewsForPaths = this.generatePreviewsForPaths.bind(this);
     },
 };
-// Global helper for main.js to call
+// Global helper for main.js to call.
+// Callers own the refresh timing (the import dialog calls window._reloadDataJson itself),
+// so this must not reload on its own or every imported item triggers a full reload.
 window._addItemToDataJson = function(item) {
     var dp = PathManager.getDataFullPath();
     try {
@@ -1808,53 +1510,6 @@ window._addItemToDataJson = function(item) {
             raw.items.push(item);
             fs.writeFileSync(dp, JSON.stringify(raw, null, 2));
         }
-    } catch(e) { console.error(e); }
-};
-
-var componentSetting = {
-    template: '#tSetting',
-    created: function() {
-        router.replace('/index');
-    },
-};
-var componentProject = {
-    template: `#tProject`,
-    data() {
-        return {
-            search: '',
-        };
-    },
-    computed: {
-        mData: {
-            get() { return this.$store.state.data; },
-        },
-        project: {
-            get() {
-                if (this.search == "") return this.mData.project || [];
-                return (this.mData.project || []).filter(function(item) {
-                    return item.name.toLowerCase().indexOf(this.search.toLowerCase()) !== -1;
-                }.bind(this));
-            },
-        },
-    },
-    methods: {
-        open: function(address) { window.shell.openPath(address); },
-        copy: function(text) { window.clipboard.writeText(text); },
-        getProjectNum: function() { return (this.project || []).length; },
-    },
-};
-
-// Global helpers for data.json
-window._addItemToDataJson = function(item) {
-    var dp = PathManager.getDataFullPath();
-    try {
-        var raw = JSON.parse(fs.readFileSync(dp).toString('utf8'));
-        if (!raw.items) raw.items = [];
-        if (!raw.items.some(function(i) { return i.path === item.path && i.category === item.category; })) {
-            raw.items.push(item);
-            fs.writeFileSync(dp, JSON.stringify(raw, null, 2));
-        }
-        window._reloadDataJson();
     } catch(e) { console.error(e); }
 };
 window._reloadDataJson = function() {
@@ -2007,64 +1662,6 @@ window.autoPreviewImport = function(folderPath, onProgress) {
     });
 };
 
-var componentSetting = {
-    template: '#tSetting',
-    created: function() {
-        router.replace('/index');
-    },
-};
-var componentProject = {
-    template: `#tProject`,
-    data() {
-        return {
-            visible: false,
-        };
-    },
-    computed: {
-        mData: {
-            get() {
-                return this.$store.state.data;
-            },
-            set(value) {
-                this.$store.commit("data", value);
-            },
-        },
-        search: {
-            get() {
-                return this.$store.state.search;
-            },
-            set(value) {
-                this.$store.commit("search", value);
-            },
-        },
-        project: {
-            get() {
-                if (this.search == "") {
-                    return this.mData.project;
-                } else {
-                    return this.mData.project.filter((item) => {
-                        return this.isSubStr(item);
-                    });
-                }
-            },
-        },
-    },
-    methods: {
-        open: function (address) {
-            window.shell.openPath(address);
-        },
-        isSubStr: function (item) {
-            if (item.name.toLowerCase().indexOf(this.search.toLowerCase()) != -1) {
-                return true;
-            } else {
-                return false;
-            }
-        },
-        getProjectNum: function () {
-            return this.project ? this.project.length : 0;
-        },
-    },
-};
 window.routes = [
     { path: "/", component: componentInit },
     { path: "/index", component: componentIndex },
