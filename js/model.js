@@ -5,6 +5,9 @@ window.store = new Vuex.Store({
 		tag: "",
 		showPath: "",
 		data : {},
+		// path → { category, bookmarked, nsfw } index over data.json items,
+		// kept in memory so filtering never re-reads the file (see _buildItemIndex)
+		itemIndex : {},
 		important: [],
 		software: [],
 		settings: {
