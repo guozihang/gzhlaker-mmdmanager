@@ -14,43 +14,6 @@ function longestCommonSubstring(a, b) {
 /*----------------------------------------------------
 # ● Init主界面的组件
 ----------------------------------------------------*/
-function getDefaultConfig() {
-    return {
-        version: '1.0',
-        items: [],
-        important: [],
-        settings: {
-            dataPath: '',
-            dataPaths: [],
-            defaultModelPath: '',
-            categories: [
-                { name: '人物模型', extensions: '.pmx,.pmd', parent: '', type: 'model' },
-                { name: '场景模型', extensions: '.pmx', parent: '', type: 'model' },
-                { name: '动作文件', extensions: '.vmd', parent: '', type: 'motion' }
-            ],
-            tags: [],
-            availableExtensions: '.pmx,.pmd,.x,.vmd,.fx',
-            preview: {
-                ambientColor: '#666666', directionalColor: '#887766',
-                showAxis: true, autoRotate: false, cameraFov: 45, cameraDistance: 30,
-                dualModel: false, showSkybox: true,
-                skyboxMode: 'color', skyboxImagePath: '',
-                skyColorTop: '#FFFFFF', skyColorBottom: '#F0F0F0', skyColorSide: '#FFFFFF',
-                buttonMode: 'hover', pageSize: 20,
-                thumbnailWidth: 48, thumbnailHeight: 48,
-                gridThumbWidth: 128, gridThumbHeight: 128,
-                viewMode: 'table', coexistEnabled: false, coexistCategories: [], defaultModelMode: 'custom'
-            },
-            render: {
-                ambientColor: '#666666', directionalColor: '#887766',
-                showAxis: false, autoRotate: false, cameraFov: 45, cameraDistance: 30,
-                showSkybox: true, skyboxMode: 'color', skyboxImagePath: '',
-                skyColorTop: '#FFFFFF', skyColorBottom: '#F0F0F0', skyColorSide: '#FFFFFF'
-            }
-        }
-    };
-}
-
 function migrateConfig(raw) {
     // Migrate old config format to v1.0
     var s = raw.settings || {};
@@ -950,48 +913,7 @@ var componentIndex = {
             }
         },
         resetSettings: function() {
-            var defaults = {
-                dataPath: '',
-                dataPaths: [{ path: '', category: '人物模型', tags: [] }],
-                availableExtensions: '.pmx,.pmd,.x,.vmd,.fx',
-                defaultModelPath: '',
-                mmdPath: '',
-                preview: {
-                    ambientColor: '#666666',
-                    directionalColor: '#887766',
-                    showAxis: true,
-                    autoRotate: false,
-                    cameraFov: 45,
-                    cameraDistance: 30,
-                    defaultModelMode: 'custom',
-                    showSkybox: true,
-                    skyboxMode: 'color',
-                    skyboxImagePath: '',
-                    skyColorTop: '#FFFFFF',
-                    skyColorBottom: '#F0F0F0',
-                    skyColorSide: '#FFFFFF',
-                    thumbnailWidth: 48,
-                    thumbnailHeight: 48,
-                    gridThumbWidth: 128,
-                    gridThumbHeight: 128,
-                    viewMode: 'table'
-                },
-                render: {
-                    ambientColor: '#666666',
-                    directionalColor: '#887766',
-                    showAxis: false,
-                    autoRotate: false,
-                    cameraFov: 45,
-                    cameraDistance: 30,
-                    showSkybox: true,
-                    skyboxMode: 'color',
-                    skyboxImagePath: '',
-                    skyColorTop: '#FFFFFF',
-                    skyColorBottom: '#F0F0F0',
-                    skyColorSide: '#FFFFFF'
-                }
-            };
-            this.settings = defaults;
+            this.settings = getDefaultConfig().settings;
             applyPreviewSettings();
             this.message("已恢复默认配置，保存后刷新生效");
         },
