@@ -202,6 +202,7 @@ var componentInit = {
                         }
                     });
                     this.$store.state.data = data;
+                    window._buildItemIndex(raw);
                     // Init bookmark map
                     var bmInit = {};
                     items.forEach(function(i) { if (i.bookmarked) bmInit[i.path] = true; });
@@ -259,7 +260,6 @@ var componentIndex = {
             dataPathForm: { path: '', category: '人物模型', tags: '' },
             settingsDialogVisible: false,
             helpDialogVisible: false,
-            _itemCategoryCache: null,
             _bookmarkVersion: 0,
             _bookmarkedPaths: {},
             searchText: '',
@@ -410,14 +410,12 @@ var componentIndex = {
             return !!bm[modelPath];
         },
         _isItemNsfw: function(mp) {
-            var cache = this._itemCategoryCache;
-            if (!cache) { this._getItemCategory(mp); cache = this._itemCategoryCache; }
-            return cache && !!cache['__nsfw__' + mp];
+            var entry = (this.$store.state.itemIndex || {})[mp];
+            return !!(entry && entry.nsfw);
         },
         _getItemBookmarked: function(mp) {
-            var cache = this._itemCategoryCache;
-            if (!cache) { this._getItemCategory(mp); cache = this._itemCategoryCache; }
-            return cache && cache['__bm__' + mp];
+            var entry = (this.$store.state.itemIndex || {})[mp];
+            return !!(entry && entry.bookmarked);
         },
         save: function () {
             var dp = PathManager.getDataFullPath();
@@ -541,58 +539,74 @@ var componentIndex = {
         },
         applyFilters: function(arr) {
             var self = this;
-            var result = arr;
+            var index = this.$store.state.itemIndex || {};
             var text = self.searchText || '';
             var cleanText = text.replace(/[$@#!][^\s]*/g, '').trim();
-            if (cleanText) {
-                var term = cleanText.toLowerCase();
-                result = result.filter(function(item) {
-                    return item.name.toLowerCase().indexOf(term) !== -1;
-                });
-            }
-            // NSFW filtering: default hide, ! shows all, !! shows only NSFW
-            var hasNsfwFilter = self.activeFilters.some(function(f) { return f.type === 'nsfw'; });
-            var hasNsfwOnlyFilter = self.activeFilters.some(function(f) { return f.type === 'nsfwOnly'; });
-            if (hasNsfwOnlyFilter) {
-                result = result.filter(function(group) {
-                    var models = group.models || [];
-                    return models.some(function(mp) { return self._isItemNsfw(mp); });
-                });
-            } else if (!hasNsfwFilter) {
-                result = result.filter(function(group) {
-                    var models = group.models || [];
-                    return models.some(function(mp) { return !self._isItemNsfw(mp); });
-                });
-            }
+            var term = cleanText ? cleanText.toLowerCase() : '';
+            // Collect every active condition once, then judge each group against
+            // all of them in a single traversal instead of one pass per condition
+            var hasNsfwFilter = false, hasNsfwOnlyFilter = false;
+            var tagFilters = [], categoryFilters = [], hasBookmarkFilter = false;
             self.activeFilters.forEach(function(f) {
-                if (f.type === 'tag') {
-                    result = result.filter(function(item) {
-                        return item.info && item.info.tags && item.info.tags.indexOf(f.value) >= 0;
-                    });
-                }
-                if (f.type === 'category') {
-                    var filterName = f.value;
-                    result = result.filter(function(group) {
-                        var models = group.models || [];
-                        return models.some(function(mp) {
-                            var cat = self._getItemCategory(mp);
-                            if (!cat) cat = self._deriveCategoryFromStore(mp);
-                            if (!cat) return false;
-                            if (cat === filterName) return true;
-                            return self._isCategoryDescendant(cat, filterName);
-                        });
-                    });
-                }
-                if (f.type === 'bookmark') {
-                    result = result.filter(function(group) {
-                        var models = group.models || [];
-                        return models.some(function(mp) {
-                            return self._getItemBookmarked(mp);
-                        });
-                    });
-                }
+                if (f.type === 'nsfw') hasNsfwFilter = true;
+                else if (f.type === 'nsfwOnly') hasNsfwOnlyFilter = true;
+                else if (f.type === 'tag') tagFilters.push(f.value);
+                else if (f.type === 'category') categoryFilters.push(f.value);
+                else if (f.type === 'bookmark') hasBookmarkFilter = true;
             });
-            return result;
+            // A category filter matches the value itself plus all its descendants;
+            // with several active, each one must independently be hit by some model
+            var catMatchSets = categoryFilters.map(function(filterName) {
+                var set = {};
+                set[filterName] = true;
+                (self.categories || []).forEach(function(c) {
+                    if (self._isCategoryDescendant(c.name, filterName)) set[c.name] = true;
+                });
+                return set;
+            });
+            var derived = categoryFilters.length > 0 ? self._derivedCategoryMap() : null;
+            // Model-level pass is only needed when a condition depends on models;
+            // with only "!" (show all incl. NSFW) active, groups pass as-is
+            var needModelPass = hasNsfwOnlyFilter || !hasNsfwFilter || categoryFilters.length > 0 || hasBookmarkFilter;
+            var catHits = categoryFilters.map(function() { return false; }); // reset per group below
+            return arr.filter(function(group) {
+                // Group-level conditions: text hit and aggregated tags
+                if (term && group.name.toLowerCase().indexOf(term) === -1) return false;
+                for (var ti = 0; ti < tagFilters.length; ti++) {
+                    var gTags = group.info && group.info.tags;
+                    if (!gTags || gTags.indexOf(tagFilters[ti]) < 0) return false;
+                }
+                if (!needModelPass) return true;
+                // Model-level conditions: each must be satisfied by some model of the
+                // group (models.some semantics, unchanged)
+                for (var ri = 0; ri < catHits.length; ri++) catHits[ri] = false;
+                var models = group.models || [];
+                var hasNsfwModel = false, hasNonNsfwModel = false, hasBookmarked = false;
+                for (var mi = 0; mi < models.length; mi++) {
+                    var mp = models[mi];
+                    var entry = index[mp];
+                    var nsfw = !!(entry && entry.nsfw);
+                    // NSFW policy: default hide, ! shows all, !! shows only NSFW
+                    if (hasNsfwOnlyFilter) { if (nsfw) hasNsfwModel = true; }
+                    else if (!hasNsfwFilter) { if (!nsfw) hasNonNsfwModel = true; }
+                    if (!hasBookmarked && entry && entry.bookmarked) hasBookmarked = true;
+                    if (categoryFilters.length > 0) {
+                        var cat = (entry && entry.category) || derived[mp] || '';
+                        if (cat) {
+                            for (var fi = 0; fi < catMatchSets.length; fi++) {
+                                if (!catHits[fi] && catMatchSets[fi][cat]) catHits[fi] = true;
+                            }
+                        }
+                    }
+                }
+                if (hasNsfwOnlyFilter && !hasNsfwModel) return false;
+                if (!hasNsfwFilter && !hasNsfwOnlyFilter && !hasNonNsfwModel) return false;
+                for (var cj = 0; cj < catHits.length; cj++) {
+                    if (!catHits[cj]) return false;
+                }
+                if (hasBookmarkFilter && !hasBookmarked) return false;
+                return true;
+            });
         },
         editTag: function (modelPath, group) {
             this.tagEditModelPath = modelPath;
@@ -1391,41 +1405,48 @@ var componentIndex = {
             next();
         },
         _getItemCategory: function(mp) {
-            if (!this._itemCategoryCache) {
-                this._itemCategoryCache = {};
-                try {
-                    var dp = PathManager.getDataFullPath();
-                    var raw = JSON.parse(fs.readFileSync(dp).toString('utf8'));
-                    (raw.items || []).forEach(function (i) {
-                        this._itemCategoryCache[i.path] = i.category || '';
-                        this._itemCategoryCache['__bm__' + i.path] = !!i.bookmarked;
-                        this._itemCategoryCache['__nsfw__' + i.path] = !!i.nsfw;
-                    }.bind(this));
-                } catch(e) {}
-            }
-            return this._itemCategoryCache[mp] || '';
+            var entry = (this.$store.state.itemIndex || {})[mp];
+            return (entry && entry.category) || '';
         },
-        _deriveCategoryFromStore: function(mp) {
+        _derivedCategoryMap: function() {
+            // path → category derived from the store grouping itself, for items
+            // whose data.json entry carries no category. Cached per (data, settings)
+            // snapshot so filtering stays O(1) per model.
             var data = this.$store.state.data;
+            var settings = this.$store.state.settings;
+            var cached = this._derivedCategoryCache;
+            if (cached && cached.data === data && cached.settings === settings) return cached.map;
             var cats = this.categories;
+            var keyMap = this.categoryDataMap;
+            var map = {};
             for (var k in data) {
                 if (!Array.isArray(data[k])) continue;
-                for (var gi = 0; gi < data[k].length; gi++) {
-                    var g = data[k][gi];
-                    if ((g.models || []).indexOf(mp) < 0) continue;
-                    // Prefer: group name matches a category name
+                var groups = data[k];
+                for (var gi = 0; gi < groups.length; gi++) {
+                    var g = groups[gi];
+                    var models = g.models || [];
+                    // Same preference as the old per-path scan: group name matching a
+                    // category first, then the category owning this store key; the first
+                    // group (store-key order) containing a path wins, even on a '' result
+                    var byName = '';
                     for (var ci = 0; ci < cats.length; ci++) {
-                        if (cats[ci].name === g.name) return cats[ci].name;
+                        if (cats[ci].name === g.name) { byName = cats[ci].name; break; }
                     }
-                    // Fallback: store key mapping
-                    for (var cj = 0; cj < cats.length; cj++) {
-                        var ck = this.categoryDataMap[cats[cj].name] || cats[cj].name;
-                        if (ck === k) return cats[cj].name;
+                    if (!byName) {
+                        for (var cj = 0; cj < cats.length; cj++) {
+                            if ((keyMap[cats[cj].name] || cats[cj].name) === k) { byName = cats[cj].name; break; }
+                        }
                     }
-                    return '';
+                    for (var mi = 0; mi < models.length; mi++) {
+                        if (map[models[mi]] === undefined) map[models[mi]] = byName;
+                    }
                 }
             }
-            return '';
+            this._derivedCategoryCache = { data: data, settings: settings, map: map };
+            return map;
+        },
+        _deriveCategoryFromStore: function(mp) {
+            return this._derivedCategoryMap()[mp] || '';
         },
         _getCategoryPath: function(name) {
             // Build full path like "人物模型 > 子分类"
@@ -1478,7 +1499,12 @@ var componentIndex = {
             } catch(e) {}
         },
         _invalidateItemCategoryCache: function() {
-            this._itemCategoryCache = null;
+            // Rebuild the item index from data.json after a direct write;
+            // on read failure the previous index is kept rather than emptied
+            try {
+                var raw = JSON.parse(fs.readFileSync(PathManager.getDataFullPath()).toString('utf8'));
+                window._buildItemIndex(raw);
+            } catch(e) {}
         },
         _invalidatePreviewCache: function() {
             // Clear hasPreview cache entries
@@ -1509,8 +1535,23 @@ window._addItemToDataJson = function(item) {
         if (!raw.items.some(function(i) { return i.path === item.path && i.category === item.category; })) {
             raw.items.push(item);
             fs.writeFileSync(dp, JSON.stringify(raw, null, 2));
+            // Patch the item index in place — called in loops during import,
+            // so a full index rebuild here would re-read data.json per item
+            Vue.set(window.store.state.itemIndex, item.path,
+                { category: item.category || '', bookmarked: !!item.bookmarked, nsfw: !!item.nsfw });
         }
     } catch(e) { console.error(e); }
+};
+
+// Build the in-memory item index (path → { category, bookmarked, nsfw }) from a
+// parsed data.json. gridItems / applyFilters read this instead of hitting the disk.
+window._buildItemIndex = function(raw) {
+    var idx = {};
+    ((raw && raw.items) || []).forEach(function(i) {
+        if (!i || !i.path) return;
+        idx[i.path] = { category: i.category || '', bookmarked: !!i.bookmarked, nsfw: !!i.nsfw };
+    });
+    window.store.state.itemIndex = idx;
 };
 window._reloadDataJson = function() {
     var dp = PathManager.getDataFullPath();
@@ -1542,6 +1583,7 @@ window._reloadDataJson = function() {
             }
         });
         window.store.state.data = data;
+        window._buildItemIndex(raw);
     } catch(e) { console.error(e); }
 };
 
