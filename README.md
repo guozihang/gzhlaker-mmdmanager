@@ -21,6 +21,7 @@ MikuMikuDance（MMD）模型/场景/动作/特效资源管理器。支持拖拽�
 ## 开发
 
 ```bash
+# Node.js ^20.19.0 || >=22.12.0
 npm install
 npm start        # 启动开发模式
 npm run build    # 打包
